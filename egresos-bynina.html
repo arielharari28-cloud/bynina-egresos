@@ -124,9 +124,10 @@ const TC=()=>Number(S.cfg?.ultimaCotizacion)||0;
 const conv=(monto,de,a,cot)=>{monto=Number(monto)||0;de=de||'ARS';a=a||'ARS';if(de===a)return monto;const c=Number(cot)||TC();if(!c)return 0;return de==='USD'?monto*c:monto/c};
 const ars=e=>conv(e.monto,e.moneda,'ARS',e.cotizacion);
 const monCta=id=>(S.cuentas[id]?.moneda)||'ARS';
-const noGasto=e=>!!S.cfg?.categorias?.[e.categoria]?.noEsGasto;
-// En reportes, un cheque cuenta el día que vence (cuando sale la plata del banco), no el día que se firma.
-const fCaja=e=>e.cheque&&e.cheque.venc?e.cheque.venc:e.fecha;
+const noGasto=e=>!!e.soloAgenda||!!S.cfg?.categorias?.[e.categoria]?.noEsGasto;
+// En reportes, un cheque suma recién cuando se marca debitado, en la fecha en que se debitó (su vencimiento, o hoy si se marca antes).
+const fDebito=venc=>venc&&venc<=hoy()?venc:hoy();
+const fCaja=e=>e.cheque?(e.cheque.debitado?(e.cheque.debitadoFecha||e.cheque.venc||e.fecha):null):e.fecha;
 const esCheque=medioId=>/cheq/i.test(medNom(medioId));
 const bancoNom=id=>(S.cfg?.bancos?.[id]?.nombre)||'';
 const razonNom=id=>(S.cfg?.razones?.[id]?.nombre)||'';
@@ -220,6 +221,7 @@ function diffEg(a,b){
   const ca=a.cheque||{},cb=b.cheque||{};
   if((ca.num||'')!==(cb.num||''))out.push(`N° cheque: ${ca.num||'—'} → ${cb.num||'—'}`);
   if((ca.venc||'')!==(cb.venc||''))out.push(`Vencimiento: ${fmtF(ca.venc)||'—'} → ${fmtF(cb.venc)||'—'}`);
+  if(!!a.soloAgenda!==!!b.soloAgenda)out.push(b.soloAgenda?'Marcado como cheque anterior (no suma como gasto)':'Vuelve a sumar como gasto');
   if(!!ca.debitado!==!!cb.debitado)out.push(cb.debitado?'Marcado como debitado':'Desmarcado como debitado');
   return out;
 }
@@ -256,7 +258,7 @@ function vHist(){
 }
 
 // ---------- CARGAR / EDITAR EGRESO ----------
-function nuevoDraft(pre){return Object.assign({id:null,monto:'',fecha:hoy(),categoria:null,cuenta:'',medio:null,nota:'',foto:'',estado:null,venc:null,moneda:'ARS',cotizacion:'',cheques:null},pre||{})}
+function nuevoDraft(pre){return Object.assign({id:null,monto:'',fecha:hoy(),categoria:null,cuenta:'',medio:null,nota:'',foto:'',estado:null,venc:null,moneda:'ARS',cotizacion:'',cheques:null,soloAgenda:false},pre||{})}
 function vCargar(){
   if(!S.draft||S.draft.id)S.draft=nuevoDraft();
   $('#vista').innerHTML=formEgreso(S.draft,false);bindFormEgreso(S.draft,false,$('#vista'),()=>{S.draft=nuevoDraft();render()});
@@ -324,7 +326,9 @@ function bindFormEgreso(d,modal,root,onNew){
       ${d.cheques.length>1?`<button data-chdel="${i}" class="dan" style="margin-top:8px;padding:6px 10px;font-size:13px">Quitar este cheque</button>`:''}
       ${d.id?`<label><input type="checkbox" data-ch="${i}" data-f="debitado" ${c.debitado?'checked':''} style="width:auto;margin-right:6px">Ya se debitó del banco</label>`:''}</div>`).join('')
       +(d.id?'':`<button id="fchadd" style="width:100%">Agregar otro cheque</button>`)
+      +`<label style="display:flex;gap:8px;align-items:flex-start;color:var(--ink);font-size:14px"><input type="checkbox" id="fsolo" ${d.soloAgenda?'checked':''} style="width:auto;margin-top:3px"><span><b>Cheque anterior</b>: aparece en la agenda para organizar el pago, pero no suma en los reportes de gastos.</span></label>`
       +`<p class="sub">El monto es la suma de los cheques. Cada cheque queda como un pago aparte, con su vencimiento en la agenda.</p>`;
+    const fs=q('#fsolo');if(fs)fs.onchange=()=>{d.soloAgenda=fs.checked};
     const suma=()=>{const t=d.cheques.reduce((a,c)=>a+parseMonto(c.importe),0);d.monto=t?t.toLocaleString('es-AR'):'';q('#fm').value=d.monto;actMon()};
     box.querySelectorAll('[data-ch]').forEach(el=>{const i=+el.dataset.ch,f=el.dataset.f;
       el.oninput=el.onchange=async()=>{
@@ -361,14 +365,14 @@ function bindFormEgreso(d,modal,root,onNew){
     let estado=cc?(d.estado&&d.estado!=='na'?d.estado:'pendiente'):'na';
     const rec={monto,fecha:d.fecha,categoria:d.categoria,cuenta:d.cuenta||null,medio:d.medio,nota:d.nota.trim(),foto:d.foto||null,estado,moneda,cotizacion:needCot?cot:null};
     if(needCot)db.ref(ROOT+'/config/ultimaCotizacion').set(cot);
-    const chq=c=>({num:String(c.num).trim(),venc:c.venc,banco:c.banco||null,razon:c.razon||null,debitado:!!c.debitado});
+    const chq=c=>({num:String(c.num).trim(),venc:c.venc,banco:c.banco||null,razon:c.razon||null,debitado:!!c.debitado,debitadoFecha:c.debitado?(c.debitadoFecha||fDebito(c.venc)):null});
     if(!d.id&&conCheque&&d.cheques.length>1){
-      const base=Object.assign({},rec,{creadoPor:S.user,ts:Date.now()});let first=null;
+      const base=Object.assign({},rec,{creadoPor:S.user,ts:Date.now(),soloAgenda:d.soloAgenda?true:null});let first=null;
       for(const c of d.cheques){const nid=uid();first=first||nid;await db.ref(ROOT+'/egresos/'+nid).set(Object.assign({},base,{monto:parseMonto(c.importe),cheque:chq(c),venc:first===nid?(d.venc||null):null}))}
       if(d.venc)await db.ref(ROOT+'/ocurrencias/'+d.venc.prog+'/'+d.venc.k).update({pagado:true,egresoId:first,pagadoFecha:rec.fecha});
       logAcc('crear','egreso',first,`${d.cheques.length} cheques · ${money(parseMonto(d.monto),rec.moneda)} · ${ctaNom(rec.cuenta)||catNom(rec.categoria)} · N° ${d.cheques.map(c=>c.num).join(', ')}`);
       toast(d.cheques.length+' cheques guardados');onNew&&onNew();return}
-    rec.cheque=conCheque?chq(d.cheques[0]):null;
+    rec.cheque=conCheque?chq(d.cheques[0]):null;rec.soloAgenda=conCheque&&d.soloAgenda?true:null;
     if(d.id){const antes=Object.assign({},S.egresos[d.id]);rec.editadoPor=S.user;rec.editadoTs=Date.now();await db.ref(ROOT+'/egresos/'+d.id).update(rec);
       const cb=diffEg(antes,Object.assign({},antes,rec));if(cb.length)logAcc('editar','egreso',d.id,resEg(Object.assign({},antes,rec)),{cambios:cb});cerrarModal();toast('Egreso actualizado')}
     else{rec.creadoPor=S.user;rec.ts=Date.now();rec.venc=d.venc||null;const nid=uid();await db.ref(ROOT+'/egresos/'+nid).set(rec);logAcc('crear','egreso',nid,resEg(rec)+(d.venc?' · paga '+vencTexto(d.venc):''));
@@ -378,7 +382,7 @@ function bindFormEgreso(d,modal,root,onNew){
   if(modal){q('#fcan').onclick=cerrarModal;q('#fdel').onclick=async()=>{if(!confirm('¿Borrar este egreso?'))return;const antes=S.egresos[d.id];await db.ref(ROOT+'/egresos/'+d.id).remove();logAcc('borrar','egreso',d.id,resEg(antes),{antes});if(d.venc)await db.ref(ROOT+'/ocurrencias/'+d.venc.prog+'/'+d.venc.k).update({pagado:null,egresoId:null,pagadoFecha:null});cerrarModal();toast(d.venc?'Egreso borrado. El vencimiento volvió a quedar pendiente':'Egreso borrado')}}
 }
 function abrirEgreso(id){const e=S.egresos[id];if(!e)return;
-  const d={id,monto:(Math.round(Number(e.monto)*100)/100).toLocaleString('es-AR'),fecha:e.fecha,categoria:e.categoria,cuenta:e.cuenta||'',medio:e.medio,nota:e.nota||'',foto:e.foto||'',estado:e.estado,venc:e.venc||null,moneda:e.moneda||'ARS',cotizacion:e.cotizacion?Number(e.cotizacion).toLocaleString('es-AR'):'',cheques:e.cheque?[{num:e.cheque.num,venc:e.cheque.venc,banco:e.cheque.banco||'',razon:e.cheque.razon||'',debitado:!!e.cheque.debitado,importe:(Math.round(Number(e.monto)*100)/100).toLocaleString('es-AR')}]:null};
+  const d={id,monto:(Math.round(Number(e.monto)*100)/100).toLocaleString('es-AR'),fecha:e.fecha,categoria:e.categoria,cuenta:e.cuenta||'',medio:e.medio,nota:e.nota||'',foto:e.foto||'',estado:e.estado,venc:e.venc||null,moneda:e.moneda||'ARS',cotizacion:e.cotizacion?Number(e.cotizacion).toLocaleString('es-AR'):'',cheques:e.cheque?[{num:e.cheque.num,venc:e.cheque.venc,banco:e.cheque.banco||'',razon:e.cheque.razon||'',debitado:!!e.cheque.debitado,debitadoFecha:e.cheque.debitadoFecha||null,importe:(Math.round(Number(e.monto)*100)/100).toLocaleString('es-AR')}]:null,soloAgenda:!!e.soloAgenda};
   abrirModal(formEgreso(d,true));bindFormEgreso(d,true,$('#modal'))}
 function abrirModal(html){$('#modal').innerHTML=`<div class="modal-bg"><div class="modal">${html}</div></div>`;$('#modal .modal-bg').onclick=e=>{if(e.target.classList.contains('modal-bg'))cerrarModal()}}
 function cerrarModal(){$('#modal').innerHTML=''}
@@ -406,7 +410,7 @@ function vMov(){
   <div class="hdr" style="margin-bottom:8px"><span class="sub">${l.length} movimientos</span><span class="num" style="font-weight:700">${money(total)}</span></div>
   ${l.length?`<div class="list">${l.slice(0,S.movLimite).map(e=>`<div class="row" data-id="${e.id}">
     <div style="min-width:0"><div style="font-weight:700">${esc(ctaNom(e.cuenta)||e.nota||catNom(e.categoria))}</div>
-    <div class="sub">${fmtFc(e.fecha)} · ${esc(catNom(e.categoria))} · ${esc(medNom(e.medio))}${e.cheque?' N° '+esc(e.cheque.num)+' vence '+fmtFc(e.cheque.venc):''}${USERS[e.creadoPor]?' · '+USERS[e.creadoPor].nombre:''}${e.nota&&e.cuenta?' · '+esc(e.nota):''}</div></div>
+    <div class="sub">${fmtFc(e.fecha)} · ${esc(catNom(e.categoria))} · ${esc(medNom(e.medio))}${e.cheque?' N° '+esc(e.cheque.num)+' vence '+fmtFc(e.cheque.venc):''}${e.soloAgenda?' · anterior, no suma':''}${USERS[e.creadoPor]?' · '+USERS[e.creadoPor].nombre:''}${e.nota&&e.cuenta?' · '+esc(e.nota):''}</div></div>
     <div style="text-align:right"><div class="num" style="font-weight:700">${money(e.monto,e.moneda)}</div>${e.moneda==='USD'?`<div class="sub num">≈ ${money(ars(e))}</div>`:''}<div style="margin-top:4px">${estadoPill(e,e.id)}</div></div></div>`).join('')}</div>
     ${l.length>S.movLimite?`<button id="mas" style="width:100%;margin-top:10px">Ver más</button>`:''}`
   :`<div class="empty">No hay movimientos con este filtro.</div>`}`;
@@ -495,7 +499,7 @@ function abrirCargo(id,cid){
 // ---------- REPORTES ----------
 function sumar(l){return l.reduce((s,e)=>s+ars(e),0)}
 function vRep(){
-  const todos=listaEgresos().map(e=>Object.assign({},e,{fecha:fCaja(e)})).filter(e=>e.fecha<=hoy()),all=todos.filter(e=>!noGasto(e)),t=hoy();
+  const todos=listaEgresos().map(e=>Object.assign({},e,{fecha:fCaja(e)})).filter(e=>e.fecha&&e.fecha<=hoy()),all=todos.filter(e=>!noGasto(e)),t=hoy();
   const r=rango(S.repModo,S.repOffset),rp=rango(S.repModo,S.repOffset-1);
   // Si el período está en curso, se compara contra el mismo tramo del período anterior (mismos días transcurridos).
   let rpc=rp,enCurso=t>=r.desde&&t<=r.hasta;
@@ -512,8 +516,8 @@ function vRep(){
   const mx=Math.max(1,...Object.values(porCat));
   const porMed={};act.forEach(e=>porMed[e.medio]=(porMed[e.medio]||0)+ars(e));
   const pend=listaEgresos().filter(e=>e.estado==='pendiente');
-  const chFut=listaEgresos().filter(e=>e.cheque&&!noGasto(e)&&e.cheque.venc>hoy());
-  const deuda=todos.filter(e=>noGasto(e)&&enRango(e.fecha,r));
+  const chFut=listaEgresos().filter(e=>e.cheque&&!noGasto(e)&&!e.cheque.debitado);
+  const deuda=todos.filter(e=>!e.soloAgenda&&noGasto(e)&&enRango(e.fecha,r));
   $('#vista').innerHTML=`<div class="grid2" style="margin-bottom:14px">${cards.map(([l,v])=>`<div class="met"><div class="l">${l}</div><div class="v num" style="font-size:18px">${money(v)}</div></div>`).join('')}</div>
   <div class="chips" style="margin-bottom:10px"><button class="chip ${S.repModo==='semana'?'on':''}" data-m="semana">Semanal</button><button class="chip ${S.repModo==='mes'?'on':''}" data-m="mes">Mensual</button></div>
   <div class="hdr card" style="padding:8px"><button id="rprev" aria-label="Período anterior">‹</button><span style="font-weight:700;text-align:center">${r.label}</span><button id="rnext" aria-label="Período siguiente" ${S.repOffset>=0?'style="visibility:hidden"':''}>›</button></div>
@@ -523,7 +527,7 @@ function vRep(){
   ${cats.length?`<div class="card">${cats.map(c=>{const a=porCat[c]||0,p=porCatP[c]||0;return `<div style="margin-bottom:12px"><div class="hdr"><span>${esc(catNom(c))}</span><span class="num">${money(a)} ${dTxt(dlt(a,p))}</span></div>
   <div class="bar"><div style="width:${Math.round(a/mx*100)}%"></div></div><div class="sub">Anterior: ${money(p)}</div></div>`}).join('')}</div>`:'<div class="empty">No hay egresos en este período.</div>'}
   ${deuda.length?`<h3>Devolución de deuda</h3><div class="row list" style="cursor:default"><span>${deuda.length} pagos · no suman como gasto</span><span class="num" style="font-weight:700">${money(sumar(deuda))}</span></div>`:''}
-  ${chFut.length?`<div class="row list" style="cursor:default;margin-top:10px"><span>${chFut.length} cheques firmados que todavía no vencen · se suman cuando vencen</span><span class="num" style="font-weight:700">${money(sumar(chFut))}</span></div>`:''}
+  ${chFut.length?`<div class="row list" style="cursor:default;margin-top:10px"><span>${chFut.length} cheques sin debitar · se suman cuando se marcan debitados</span><span class="num" style="font-weight:700">${money(sumar(chFut))}</span></div>`:''}
   <h3>Por medio de pago</h3>
   <div class="list">${Object.entries(porMed).sort((a,b)=>b[1]-a[1]).map(([m,v])=>`<div class="row" style="cursor:default"><span>${esc(medNom(m)||'Sin medio')}</span><span class="num">${money(v)}</span></div>`).join('')||'<div class="empty">Sin datos.</div>'}</div>
   <h3>Pendientes de bajar</h3>
@@ -668,7 +672,7 @@ function itemAgenda(o){
 function bindAgendaItems(root){
   root.querySelectorAll('[data-deb]').forEach(b=>b.onclick=async ev=>{ev.stopPropagation();const e=S.egresos[b.dataset.deb];if(!e)return;
     if(!confirm(`¿Se debitó el cheque N° ${e.cheque.num} por ${money(e.monto,e.moneda)}?`))return;
-    await db.ref(ROOT+'/egresos/'+b.dataset.deb+'/cheque').update({debitado:true,debitadoPor:S.user,debitadoTs:Date.now()});logAcc('debitado','egreso',b.dataset.deb,resEg(e));toast('Cheque marcado como debitado')});
+    await db.ref(ROOT+'/egresos/'+b.dataset.deb+'/cheque').update({debitado:true,debitadoFecha:fDebito(e.cheque.venc),debitadoPor:S.user,debitadoTs:Date.now()});logAcc('debitado','egreso',b.dataset.deb,resEg(e));toast('Cheque marcado como debitado')});
   root.querySelectorAll('[data-eg]').forEach(r=>r.onclick=()=>abrirEgreso(r.dataset.eg));
   root.querySelectorAll('[data-pagar]').forEach(b=>b.onclick=ev=>{ev.stopPropagation();const[p,k]=b.dataset.pagar.split('|');abrirPagar(p,k)});
   root.querySelectorAll('[data-occ]').forEach(r=>r.onclick=()=>{const[p,k]=r.dataset.occ.split('|');abrirOcc(p,k)});
@@ -694,7 +698,7 @@ function vAgenda(){
     let l=chequesAgenda('2999-12-31');if(f==='pend')l=l.filter(o=>!o.pagado);if(f==='deb')l=l.filter(o=>o.pagado);
     l.sort((a,b)=>f==='deb'?b.fecha.localeCompare(a.fecha):a.fecha.localeCompare(b.fecha));
     const porMes={};l.forEach(o=>{const m=o.fecha.slice(0,7);(porMes[m]=porMes[m]||[]).push(o)});
-    body=`<div class="chips" style="margin-bottom:6px">${[['pend','A debitar'],['deb','Debitados'],['todos','Todos']].map(([k,x])=>`<button class="chip ${f===k?'on':''}" data-chf="${k}">${x}</button>`).join('')}</div>
+    body=`<button id="chant" style="width:100%;margin-bottom:8px">Marcar cheques anteriores</button><div class="chips" style="margin-bottom:6px">${[['pend','A debitar'],['deb','Debitados'],['todos','Todos']].map(([k,x])=>`<button class="chip ${f===k?'on':''}" data-chf="${k}">${x}</button>`).join('')}</div>
       <div class="hdr" style="margin:6px 0"><span class="sub">${l.length} cheques</span><span class="num" style="font-weight:700">${money(sumar(l))}</span></div>
       ${l.length?Object.entries(porMes).map(([m,x])=>`<div class="hdr" style="margin:14px 0 6px"><span style="font-weight:700">${mesNom(m+'-01')}</span><span class="num" style="font-weight:700">${money(sumar(x))}</span></div><div class="list">${x.map(itemCheque).join('')}</div>`).join('')
       :'<div class="empty">No hay cheques en esta lista. Se cargan desde "Cargar", eligiendo Cheque o Echeq como medio de pago.</div>'}`;
@@ -719,10 +723,24 @@ function vAgenda(){
   $('#vista').innerHTML=tabs+cards+body;
   document.querySelectorAll('[data-am]').forEach(b=>b.onclick=()=>{S.agModo=b.dataset.am;render()});
   document.querySelectorAll('[data-chf]').forEach(b=>b.onclick=()=>{S.chFiltro=b.dataset.chf;render()});
+  const ca=$('#chant');if(ca)ca.onclick=abrirAnteriores;
   $('#nprog').onclick=()=>abrirProgramado(null);
   const cp=$('#cprev');if(cp){cp.onclick=()=>{S.calOffset--;render()};$('#cnext').onclick=()=>{S.calOffset++;render()}}
   document.querySelectorAll('[data-dia]').forEach(b=>b.onclick=()=>{S.calSel=b.dataset.dia;render()});
   bindAgendaItems($('#vista'));
+}
+function abrirAnteriores(){
+  const l=listaEgresos().filter(e=>e.cheque).sort((a,b)=>a.cheque.venc.localeCompare(b.cheque.venc));
+  abrirModal(`<h2>Cheques anteriores</h2><p class="sub">Los que marques siguen en la agenda y en la lista de cheques, pero no suman en los reportes de gastos. Sirve para cheques que se firmaron antes de usar la app.</p>
+  <div class="list" style="margin-top:10px">${l.map(e=>`<label class="row" style="margin:0;align-items:center;cursor:pointer"><input type="checkbox" data-ant="${e.id}" ${e.soloAgenda?'checked':''} style="width:auto;flex:none">
+    <div style="flex:1"><div style="font-weight:700">N° ${esc(e.cheque.num)}${ctaNom(e.cuenta)||e.nota?' · '+esc(ctaNom(e.cuenta)||e.nota):''}</div><div class="sub">vence ${fmtF(e.cheque.venc)} · firmado ${fmtF(e.fecha)}</div></div>
+    <div class="num" style="font-weight:700">${money(e.monto,e.moneda)}</div></label>`).join('')||'<div class="empty">No hay cheques cargados.</div>'}</div>
+  <div class="actions"><button id="antcan">Cancelar</button><button class="pri" id="antok">Guardar</button></div>`);
+  $('#antcan').onclick=cerrarModal;
+  $('#antok').onclick=async()=>{let n=0;const up={};
+    document.querySelectorAll('[data-ant]').forEach(c=>{const e=S.egresos[c.dataset.ant];if(!!e.soloAgenda!==c.checked){up[c.dataset.ant+'/soloAgenda']=c.checked?true:null;n++}});
+    if(n){await db.ref(ROOT+'/egresos').update(up);logAcc('editar','egreso',null,`Cambió ${n} cheque${n>1?'s':''} entre anterior y normal`)}
+    cerrarModal();toast(n?'Listo':'Sin cambios')};
 }
 function buscarOcc(prog,k){return ocurrencias('2100-01-01').find(o=>o.prog===prog&&o.k===k)}
 function abrirPagar(prog,k){
@@ -810,7 +828,7 @@ async function descargarBackup(){
     ctas.forEach(([id,c])=>{const m=movimientosCuenta(id);if(!m.length)return;
       XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(m.map(x=>({Fecha:fmtF(x.fecha),Descripción:x.desc,Debe:x.tipo==='debe'?x.monto:'',Haber:x.tipo==='haber'?x.monto:'',Saldo:x.saldo,Estado:x.tipo==='haber'?(est[x.estado]||''):''}))),nombreHoja(c.nombre,usados))});
     const ch=listaEgresos().filter(e=>e.cheque).sort((a,b)=>a.cheque.venc.localeCompare(b.cheque.venc));
-    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(ch.map(e=>({'NUM CHEQUE':e.cheque.num,MES:mesNom(e.cheque.venc),VENC:fmtF(e.cheque.venc),IMPORTE:Number(e.monto),MONEDA:e.moneda||'ARS','RAZON SOCIAL':razonNom(e.cheque.razon),BANCO:bancoNom(e.cheque.banco),PROVEEDOR:ctaNom(e.cuenta),'FECHA FIRMADO':fmtF(e.fecha),TIPO:medNom(e.medio),ESTADO:e.cheque.debitado?'Debitado':'A debitar'}))),nombreHoja('Cheques',usados));
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(ch.map(e=>({'NUM CHEQUE':e.cheque.num,MES:mesNom(e.cheque.venc),VENC:fmtF(e.cheque.venc),IMPORTE:Number(e.monto),MONEDA:e.moneda||'ARS','RAZON SOCIAL':razonNom(e.cheque.razon),BANCO:bancoNom(e.cheque.banco),PROVEEDOR:ctaNom(e.cuenta),'FECHA FIRMADO':fmtF(e.fecha),TIPO:medNom(e.medio),ANTERIOR:e.soloAgenda?'Sí':'No',ESTADO:e.cheque.debitado?'Debitado':'A debitar'}))),nombreHoja('Cheques',usados));
     const ag=ocurrencias(addDias(hoy(),120)).filter(o=>!o.pagado);
     XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(ag.map(o=>({Vence:fmtF(o.fecha),Concepto:occNombre(o),Monto:o.monto,Moneda:o.moneda,Categoría:catNom(o.p.categoria),Cuenta:ctaNom(o.p.cuenta),'Medio previsto':medNom(o.p.medio),Estado:o.fecha<hoy()?'Vencido':'Pendiente'}))),nombreHoja('Agenda pendiente',usados));
     XLSX.writeFile(wb,`Backup egresos By Nina ${hoy()}.xlsx`);
