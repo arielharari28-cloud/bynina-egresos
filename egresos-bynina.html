@@ -454,12 +454,19 @@ function vLedger(cid){
   <div class="grid2" style="margin-bottom:10px"><div class="met"><div class="l">Saldo actual</div><div class="v num">${money(s.saldo,mc)}</div></div>
   <div class="met"><div class="l">Último pago</div><div class="num" style="font-weight:700;margin-top:4px">${s.ult?fmtFc(s.ult.fecha)+' · '+money(s.ult.monto,mc):'Sin pagos'}</div></div></div>
   <div class="actions" style="margin:0 0 10px"><button id="ldebe">Cargar debe</button><button id="ldesc">${c.tipo==='Empleados'?'Descuento':'Crédito / descuento'}</button><button id="lpago" class="pri">Cargar pago</button></div>
+  ${(()=>{const ag=ocurrencias(addDias(hoy(),90)).filter(o=>!o.pagado&&o.p.cuenta===cid);
+    return `<div class="card" style="display:flex;align-items:center;gap:10px;padding:10px 12px"><div style="flex:1;min-width:0">${ag.length?`<div style="font-weight:700">Ya agendado: ${money(sumar(ag))}</div><div class="sub">${ag.slice(0,3).map(o=>esc(occNombre(o))+' '+fmtFc(o.fecha)).join(' · ')}${ag.length>3?' · y '+(ag.length-3)+' más':''}</div>`:'<div class="sub" style="margin:0">No hay pagos agendados para esta cuenta.</div>'}</div>
+      ${s.saldo>0?'<button id="lagen" style="flex:none">Agendar saldo</button>':''}</div>`})()}
   ${m.length?`<div class="ledger-wrap"><table class="lg"><tr><th class="l">Fecha</th><th class="l">Descripción</th><th>Debe</th><th>Haber</th><th>Saldo</th></tr>
   ${m.map(x=>`<tr data-k="${x.esDesc?'desc':x.tipo}" data-id="${x.id}"><td class="l num">${fmtF(x.fecha)}</td><td class="l">${esc(x.desc)}${x.estado==='pendiente'?' <span class="pill p-pend">pend.</span>':''}${x.esDesc?' <span class="pill p-na">descuento</span>':''}</td>
   <td class="num">${x.tipo==='debe'?money(x.monto,mc):''}</td><td class="num h">${x.tipo==='haber'?money(x.monto,mc):''}</td><td class="num" style="font-weight:700">${money(x.saldo,mc)}</td></tr>`).join('')}</table></div>`
   :`<div class="empty">Esta cuenta todavía no tiene movimientos. Cargá lo que se le debe o un pago.</div>`}`;
   $('#volver').onclick=()=>{S.cuentaAbierta=null;render()};
   $('#ldebe').onclick=()=>abrirCargo(null,cid);
+  const lag=$('#lagen');if(lag)lag.onclick=()=>{const cat=activos(S.cfg.categorias).find(([,k])=>(c.tipo==='Talleres'&&k.nombre==='Talleres')||(c.tipo==='Empleados'&&/sueldo/i.test(k.nombre)));
+    const ag=sumar(ocurrencias(addDias(hoy(),90)).filter(o=>!o.pagado&&o.p.cuenta===cid));
+    if(ag&&!confirm(`Esta cuenta ya tiene ${money(ag)} agendados. Si agendás el saldo completo puede quedar contado dos veces en la agenda y en Caja. ¿Seguir igual?`))return;
+    abrirProgramado(null,{concepto:'Saldo '+c.nombre,monto:Math.round(s.saldo*100)/100,fecha:addDias(hoy(),1),repite:'una',categoria:cat?cat[0]:null,cuenta:cid,moneda:mc})};
   $('#ldesc').onclick=()=>abrirCargo(null,cid,'haber');
   $('#lpago').onclick=()=>{const cat=activos(S.cfg.categorias).find(([,k])=>(c.tipo==='Talleres'&&k.nombre==='Talleres')||(c.tipo==='Empleados'&&/sueldo/i.test(k.nombre)));
     const d=nuevoDraft({cuenta:cid,categoria:cat?cat[0]:null,moneda:mc});abrirModal('<h2>Cargar pago · '+esc(c.nombre)+'</h2>'+formEgreso(d,false)+'<button id="fcan2" style="width:100%;margin-top:8px">Cancelar</button>');bindFormEgreso(d,false,$('#modal'),cerrarModal);$('#fcan2').onclick=cerrarModal};
@@ -863,8 +870,8 @@ function abrirOcc(prog,k){
   $('#oedit').onclick=()=>abrirProgramado(prog);
   $('#oborr').onclick=async()=>{if(!confirm('¿Borrar toda la programación? Los pagos ya hechos quedan en egresos.'))return;await db.ref(ROOT+'/programados/'+prog).update({activo:false});logAcc('borrar','programado',prog,o.p.concepto);cerrarModal();toast('Programación borrada')};
 }
-function abrirProgramado(id){
-  const p=id?S.programados[id]:{concepto:'',monto:'',fecha:hoy(),repite:'una',cuotas:'',categoria:null,cuenta:'',medio:null};
+function abrirProgramado(id,pre){
+  const p=id?S.programados[id]:Object.assign({concepto:'',monto:'',fecha:hoy(),repite:'una',cuotas:'',categoria:null,cuenta:'',medio:null},pre||{});
   const cats=activos(S.cfg.categorias),meds=activos(S.cfg.medios);
   abrirModal(`<h2>${id?'Editar pago agendado':'Agendar pago'}</h2>
   <label for="pc">Concepto</label><input id="pc" value="${esc(p.concepto)}" placeholder="Alquiler local">
