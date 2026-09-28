@@ -454,17 +454,21 @@ function vLedger(cid){
   <div class="grid2" style="margin-bottom:10px"><div class="met"><div class="l">Saldo actual</div><div class="v num">${money(s.saldo,mc)}</div></div>
   <div class="met"><div class="l">Último pago</div><div class="num" style="font-weight:700;margin-top:4px">${s.ult?fmtFc(s.ult.fecha)+' · '+money(s.ult.monto,mc):'Sin pagos'}</div></div></div>
   <div class="actions" style="margin:0 0 10px"><button id="ldebe">Cargar debe</button><button id="ldesc">${c.tipo==='Empleados'?'Descuento':'Crédito / descuento'}</button><button id="lpago" class="pri">Cargar pago</button></div>
-  ${(()=>{const ag=ocurrencias(addDias(hoy(),90)).filter(o=>!o.pagado&&o.p.cuenta===cid);
-    return `<div class="card" style="display:flex;align-items:center;gap:10px;padding:10px 12px"><div style="flex:1;min-width:0">${ag.length?`<div style="font-weight:700">Ya agendado: ${money(sumar(ag))}</div><div class="sub">${ag.slice(0,3).map(o=>esc(occNombre(o))+' '+fmtFc(o.fecha)).join(' · ')}${ag.length>3?' · y '+(ag.length-3)+' más':''}</div>`:'<div class="sub" style="margin:0">No hay pagos agendados para esta cuenta.</div>'}</div>
-      ${s.saldo>0?'<button id="lagen" style="flex:none">Agendar saldo</button>':''}</div>`})()}
+  ${(()=>{const ag=ocurrencias(addDias(hoy(),365)).filter(o=>!o.pagado&&o.p.cuenta===cid),tot=sumar(ag),dif=Math.round(s.saldo-tot);
+    const chk=mc!=='ARS'||!ag.length?'':dif>0?`<span style="color:var(--danger)">Sin agendar: ${money(dif)}</span>`:dif<0?`<span style="color:var(--danger)">Agendado de más: ${money(-dif)}</span>`:'<span style="color:var(--ok)">Coincide con el saldo</span>';
+    return `<div class="hdr" style="margin:4px 0 6px"><span style="font-weight:700">Compromisos agendados</span><span class="num" style="font-weight:700">${money(tot)}</span></div>
+    ${ag.length?`<div class="list" id="lcomp">${ag.map(itemAgenda).join('')}</div><div class="hdr" style="margin:6px 2px 12px"><span class="sub" style="margin:0">${chk}</span>${s.saldo>0?'<button id="lagen" style="padding:6px 10px;font-size:13px">Agendar saldo</button>':''}</div>`
+      :`<div class="card" style="display:flex;align-items:center;gap:10px;padding:10px 12px"><div class="sub" style="flex:1;margin:0">No hay pagos agendados para esta cuenta.</div>${s.saldo>0?'<button id="lagen" style="flex:none">Agendar saldo</button>':''}</div>`}
+    <div style="font-weight:700;margin:4px 0 6px">Movimientos</div>`})()}
   ${m.length?`<div class="ledger-wrap"><table class="lg"><tr><th class="l">Fecha</th><th class="l">Descripción</th><th>Debe</th><th>Haber</th><th>Saldo</th></tr>
   ${m.map(x=>`<tr data-k="${x.esDesc?'desc':x.tipo}" data-id="${x.id}"><td class="l num">${fmtF(x.fecha)}</td><td class="l">${esc(x.desc)}${x.estado==='pendiente'?' <span class="pill p-pend">pend.</span>':''}${x.esDesc?' <span class="pill p-na">descuento</span>':''}</td>
   <td class="num">${x.tipo==='debe'?money(x.monto,mc):''}</td><td class="num h">${x.tipo==='haber'?money(x.monto,mc):''}</td><td class="num" style="font-weight:700">${money(x.saldo,mc)}</td></tr>`).join('')}</table></div>`
   :`<div class="empty">Esta cuenta todavía no tiene movimientos. Cargá lo que se le debe o un pago.</div>`}`;
   $('#volver').onclick=()=>{S.cuentaAbierta=null;render()};
   $('#ldebe').onclick=()=>abrirCargo(null,cid);
+  const lcomp=$('#lcomp');if(lcomp)bindAgendaItems(lcomp);
   const lag=$('#lagen');if(lag)lag.onclick=()=>{const cat=activos(S.cfg.categorias).find(([,k])=>(c.tipo==='Talleres'&&k.nombre==='Talleres')||(c.tipo==='Empleados'&&/sueldo/i.test(k.nombre)));
-    const ag=sumar(ocurrencias(addDias(hoy(),90)).filter(o=>!o.pagado&&o.p.cuenta===cid));
+    const ag=sumar(ocurrencias(addDias(hoy(),365)).filter(o=>!o.pagado&&o.p.cuenta===cid));
     if(ag&&!confirm(`Esta cuenta ya tiene ${money(ag)} agendados. Si agendás el saldo completo puede quedar contado dos veces en la agenda y en Caja. ¿Seguir igual?`))return;
     abrirProgramado(null,{concepto:'Saldo '+c.nombre,monto:Math.round(s.saldo*100)/100,fecha:addDias(hoy(),1),repite:'una',categoria:cat?cat[0]:null,cuenta:cid,moneda:mc})};
   $('#ldesc').onclick=()=>abrirCargo(null,cid,'haber');
