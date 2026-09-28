@@ -164,6 +164,9 @@ function iniciarDatos(){
   db.ref(ROOT+'/cargos').on('value',s=>{S.cargos=s.val()||{};render()});
   db.ref(ROOT+'/programados').on('value',s=>{S.programados=s.val()||{};render()});
   db.ref(ROOT+'/ocurrencias').on('value',s=>{S.ocurr=s.val()||{};render()});
+  db.ref(ROOT+'/caja').on('value',async s=>{const v=s.val()||{};
+    if(!v.fuentes){const up={};['Nina Cya - Credicoop','Efectivo local','Mercado Pago'].forEach((n,i)=>up['fuentes/'+uid()]={nombre:n,orden:i,saldo:0});await db.ref(ROOT+'/caja').update(up);return}
+    S.caja=v;if(S.view==='agenda'&&S.agModo==='caja')render()});
   db.ref(ROOT+'/log').limitToLast(1000).on('value',s=>{S.log=s.val()||{};if(S.view==='hist')render()});
 }
 
@@ -653,6 +656,61 @@ function pintarVenc(d,q){
       if(o&&!parseMonto(d.monto)){d.monto=(Math.round(o.monto*100)/100).toLocaleString('es-AR');q('#fm').value=d.monto;d.moneda=o.moneda;q('#fm').dispatchEvent(new Event('input'))}}
     box.querySelectorAll('.chip').forEach(x=>x.classList.toggle('on',x===b))});
 }
+
+// ---------- Caja proyectada ----------
+// Disponible hoy (saldos cargados a mano) + venta estimada por día − lo agendado pendiente (incluye vencidos y cheques a debitar) hasta la fecha elegida.
+// La venta estimada se suma desde mañana; lo de hoy se asume ya reflejado en los saldos.
+function cajaFuentes(){return Object.entries((S.caja||{}).fuentes||{}).filter(([,f])=>f&&f.activo!==false).sort((a,b)=>(a[1].orden||0)-(b[1].orden||0))}
+function cajaHasta(){return S.cajaHasta||rango('semana',0).hasta}
+function cajaCalc(){
+  const t=hoy(),hasta=cajaHasta(),v=(S.caja||{}).venta||{},porDia=Number(v.porDia)||0,dom=!!v.domingos;
+  const disp=cajaFuentes().reduce((a,[,f])=>a+(Number(f.saldo)||0),0);
+  const pend=agendaItems(hasta).filter(o=>!o.pagado&&o.fecha<=hasta);
+  const pagosDia={};pend.forEach(o=>{const f=o.fecha<t?t:o.fecha;(pagosDia[f]=pagosDia[f]||[]).push(o)});
+  let saldo=disp,ventaTot=0,min={saldo:disp,fecha:t};const filas=[];
+  for(let f=t;f<=hasta;f=addDias(f,1)){
+    const vta=f>t&&(dom||fromIso(f).getDay()!==0)?porDia:0,pg=pagosDia[f]?sumar(pagosDia[f]):0;
+    ventaTot+=vta;saldo+=vta-pg;if(saldo<min.saldo)min={saldo,fecha:f};
+    if(pg)filas.push({f,pg,n:pagosDia[f].length,saldo,vencidos:f===t&&pagosDia[f].some(o=>o.fecha<t)});
+  }
+  return{t,hasta,disp,ventaTot,pagos:sumar(pend),saldo,min,filas,porDia,dom};
+}
+function cajaHtml(){
+  const c=cajaCalc(),fu=cajaFuentes(),rojo=n=>n<0?'color:var(--danger)':'';
+  const act=fu.map(([,f])=>f.ts||0).reduce((a,b)=>Math.max(a,b),0),por=fu.find(([,f])=>f.ts===act);
+  const atajos=[['Esta semana',rango('semana',0).hasta],['2 semanas',rango('semana',1).hasta],['Fin de mes',rango('mes',0).hasta],['Mes que viene',rango('mes',1).hasta]];
+  const dNom=f=>{const d=fromIso(f).toLocaleDateString('es-AR',{weekday:'short'});return d.charAt(0).toUpperCase()+d.slice(1).replace('.','')+' '+fmtFc(f)};
+  return `<div class="card"><div class="hdr"><span style="font-weight:700">Disponible hoy</span><span class="num" style="font-weight:700">${money(c.disp)}</span></div>
+    <p class="sub" style="margin-top:2px">${act?'Actualizado '+new Date(act).toLocaleString('es-AR',{day:'numeric',month:'numeric',hour:'2-digit',minute:'2-digit'})+(por&&USERS[por[1].por]?' por '+USERS[por[1].por].nombre:''):'Cargá los saldos de hoy.'}</p>
+    ${fu.map(([id,f])=>`<div class="edit-item" style="padding:6px 0"><span>${esc(f.nombre)}</span><input data-fsal="${id}" class="num" inputmode="decimal" style="max-width:170px;text-align:right" value="${(Number(f.saldo)||0).toLocaleString('es-AR')}"><button data-fdel="${id}" aria-label="Quitar" style="padding:6px 9px">✕</button></div>`).join('')}
+    <button id="fadd" style="margin-top:8px;font-size:13px;padding:6px 10px">+ Agregar cuenta o caja</button></div>
+  <div class="card"><div style="font-weight:700">Venta aproximada</div>
+    <div style="display:flex;gap:8px;align-items:center;margin-top:8px"><input id="cvta" class="num" inputmode="decimal" style="max-width:170px" value="${c.porDia.toLocaleString('es-AR')}"><span class="sub" style="margin:0">por día</span></div>
+    <div class="chips" style="margin-top:8px"><button class="chip ${c.dom?'':'on'}" data-cdom="0">Sin domingos</button><button class="chip ${c.dom?'on':''}" data-cdom="1">Todos los días</button></div>
+    <p class="sub">Se suma desde mañana.</p></div>
+  <div class="card"><div style="font-weight:700">Calcular hasta</div>
+    <div class="chips" style="margin-top:8px">${atajos.map(([n,f])=>`<button class="chip ${c.hasta===f?'on':''}" data-chas="${f}">${n}</button>`).join('')}</div>
+    <input id="chas" type="date" value="${c.hasta}" style="margin-top:8px"></div>
+  <div class="card"><div class="hdr"><span>Disponible hoy</span><span class="num">${money(c.disp)}</span></div>
+    <div class="hdr" style="margin-top:6px"><span>+ Venta estimada</span><span class="num">${money(c.ventaTot)}</span></div>
+    <div class="hdr" style="margin-top:6px"><span>− Pagos y cheques hasta el ${fmtFc(c.hasta)}</span><span class="num">${money(c.pagos)}</span></div>
+    <div class="hdr" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line)"><span style="font-weight:700">Queda al ${fmtFc(c.hasta)}</span><span class="num big" style="${rojo(c.saldo)}">${money(c.saldo)}</span></div>
+    <div class="hdr" style="margin-top:4px"><span class="sub" style="margin:0">Sin contar la venta estimada</span><span class="num sub" style="margin:0;${rojo(c.saldo-c.ventaTot)}">${money(c.saldo-c.ventaTot)}</span></div>
+    ${c.min.saldo<0?`<p style="margin:10px 0 0;color:var(--danger);font-weight:700">El punto más bajo es el ${dNom(c.min.fecha)}: ${money(c.min.saldo)}</p>`:''}</div>
+  ${c.filas.length?`<div class="hdr" style="margin:14px 0 6px"><span style="font-weight:700">Día por día</span><span class="sub" style="margin:0">saldo al cierre</span></div>
+  <div class="list">${c.filas.map(r=>`<div class="row" style="cursor:default;align-items:center"><div><div style="font-weight:700">${dNom(r.f)}</div><div class="sub">${r.n} pago${r.n>1?'s':''}${r.vencidos?' · incluye vencidos':''} · ${money(r.pg)}</div></div><div class="num" style="font-weight:700;${rojo(r.saldo)}">${money(r.saldo)}</div></div>`).join('')}</div>`:'<div class="sub" style="padding:4px 2px">No hay pagos pendientes en ese período.</div>'}`;
+}
+function bindCaja(){
+  const R=db.ref(ROOT+'/caja');
+  document.querySelectorAll('[data-fsal]').forEach(i=>i.onchange=async()=>{const id=i.dataset.fsal,f=S.caja.fuentes[id],v=parseMonto(i.value);
+    await R.child('fuentes/'+id).update({saldo:v,ts:Date.now(),por:S.user});logAcc('config','config',null,`Saldo ${f.nombre}: ${money(f.saldo)} → ${money(v)}`)});
+  document.querySelectorAll('[data-fdel]').forEach(b=>b.onclick=async()=>{const f=S.caja.fuentes[b.dataset.fdel];if(!confirm(`¿Quitar "${f.nombre}" de la caja?`))return;await R.child('fuentes/'+b.dataset.fdel).update({activo:false});logAcc('config','config',null,`Quitó "${f.nombre}" de la caja`)});
+  $('#fadd').onclick=async()=>{const n=prompt('Nombre (ej: Galicia, Caja fábrica)');if(!n||!n.trim())return;await R.child('fuentes/'+uid()).set({nombre:n.trim(),orden:cajaFuentes().length,saldo:0});logAcc('config','config',null,`Agregó "${n.trim()}" a la caja`)};
+  $('#cvta').onchange=async e=>{const v=parseMonto(e.target.value);await R.child('venta').update({porDia:v,ts:Date.now(),por:S.user});logAcc('config','config',null,`Venta aproximada por día: ${money(v)}`)};
+  document.querySelectorAll('[data-cdom]').forEach(b=>b.onclick=()=>R.child('venta').update({domingos:b.dataset.cdom==='1'}));
+  document.querySelectorAll('[data-chas]').forEach(b=>b.onclick=()=>{S.cajaHasta=b.dataset.chas;render()});
+  $('#chas').onchange=e=>{if(e.target.value){S.cajaHasta=e.target.value;render()}};
+}
 function chequesAgenda(hasta){
   return listaEgresos().filter(e=>e.cheque&&e.cheque.venc&&(e.cheque.venc<=hasta)).map(e=>({tipo:'cheque',id:e.id,fecha:e.cheque.venc,monto:Number(e.monto),moneda:e.moneda||'ARS',cotizacion:e.cotizacion,pagado:!!e.cheque.debitado,e}));
 }
@@ -705,7 +763,7 @@ function porDiaHtml(l){
 function vAgenda(){
   const t=hoy(),sem=rango('semana',0);
   const modo=S.agModo||'lista';
-  const tabs=`<div class="chips" style="margin-bottom:10px"><button class="chip ${modo==='lista'?'on':''}" data-am="lista">Agenda</button><button class="chip ${modo==='mes'?'on':''}" data-am="mes">Mes</button><button class="chip ${modo==='cheques'?'on':''}" data-am="cheques">Cheques</button><button class="pri" id="nprog" style="margin-left:auto;padding:7px 12px;font-size:13px">Agendar pago</button></div>`;
+  const tabs=`<div class="chips" style="margin-bottom:10px"><button class="chip ${modo==='lista'?'on':''}" data-am="lista">Agenda</button><button class="chip ${modo==='mes'?'on':''}" data-am="mes">Mes</button><button class="chip ${modo==='cheques'?'on':''}" data-am="cheques">Cheques</button><button class="chip ${modo==='caja'?'on':''}" data-am="caja">Caja</button><button class="pri" id="nprog" style="margin-left:auto;padding:7px 12px;font-size:13px">Agendar pago</button></div>`;
   const pend=agendaItems(addDias(t,40)).filter(o=>!o.pagado);
   const venc=pend.filter(o=>o.fecha<t),estaSem=pend.filter(o=>o.fecha>=t&&o.fecha<=sem.hasta);
   const cards=`<div class="grid2" style="margin-bottom:12px"><div class="met"><div class="l">Vencido sin pagar</div><div class="v num" style="${venc.length?'color:var(--danger)':''}">${money(sumar(venc))}</div></div>
@@ -719,6 +777,7 @@ function vAgenda(){
       ${l.length?porDiaHtml(l):'<div class="sub" style="padding:4px 2px">Nada agendado.</div>'}`).join('');
     body=`<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:4px"><button id="dabr" style="padding:6px 10px;font-size:13px">Abrir todo</button><button id="dcer" style="padding:6px 10px;font-size:13px">Cerrar todo</button></div>`+body;
     if(!Object.keys(S.programados).length&&!chequesAgenda('2999-12-31').some(o=>!o.pagado))body=`<div class="empty">Todavía no hay pagos agendados. Cargá alquiler, sueldos, echeqs o cuotas con "Agendar pago".</div>`;
+  }else if(modo==='caja'){body=cajaHtml();
   }else if(modo==='cheques'){
     const f=S.chFiltro||'pend';
     let l=chequesAgenda('2999-12-31');if(f==='pend')l=l.filter(o=>!o.pagado);if(f==='deb')l=l.filter(o=>o.pagado);
@@ -757,6 +816,7 @@ function vAgenda(){
   const cp=$('#cprev');if(cp){cp.onclick=()=>{S.calOffset--;render()};$('#cnext').onclick=()=>{S.calOffset++;render()}}
   document.querySelectorAll('[data-dia]').forEach(b=>b.onclick=()=>{S.calSel=b.dataset.dia;render()});
   bindAgendaItems($('#vista'));
+  if(modo==='caja')bindCaja();
 }
 function abrirAnteriores(){
   const l=listaEgresos().filter(e=>e.cheque).sort((a,b)=>a.cheque.venc.localeCompare(b.cheque.venc));
