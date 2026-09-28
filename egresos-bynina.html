@@ -283,7 +283,7 @@ function formEgreso(d,modal){
   <label>Medio de pago</label><div class="chips" id="fmd">${meds.map(([id,c])=>`<button class="chip ${d.medio===id?'on':''}" data-id="${id}">${esc(c.nombre)}</button>`).join('')}</div>
   <div id="fcheq"></div>
   <label for="fn">Nota</label><input id="fn" placeholder="Entrega parcial corte 412 · Vale ropa: remera 7800" value="${esc(d.nota)}">
-  ${d.id?(d.venc?`<label>Vencimiento</label><p class="sub" style="font-size:14px">Paga: ${esc(vencTexto(d.venc))}</p>`:''):`<label>¿Corresponde a un vencimiento agendado?</label><div class="chips" id="fv"></div>`}
+  ${d.id?(d.venc?`<label>Vencimiento</label><p class="sub" style="font-size:14px">Paga: ${esc(vencTexto(d.venc))}</p>`:''):`<div id="fvw" class="hidden"><label>¿Corresponde a un vencimiento agendado?</label><div class="chips" id="fv"></div></div>`}
   <label>Comprobante</label>
   <div style="display:flex;gap:8px;align-items:center"><input type="file" id="ffoto" accept="image/*" class="hidden"><button id="fbfoto">${d.foto?'Cambiar foto':'Sacar o subir foto'}</button>${d.foto?`<a href="${esc(d.foto)}" target="_blank" style="font-size:13px">Ver foto</a>`:''}<span id="fsub" class="sub"></span></div>
   ${modal&&cc?`<label>Estado</label><div class="chips" id="fe"><button class="chip ${d.estado==='pendiente'?'on':''}" data-e="pendiente">Pendiente de bajar</button><button class="chip ${d.estado==='bajado'?'on':''}" data-e="bajado">Bajado</button></div>`:''}
@@ -634,16 +634,20 @@ function ocurrencias(hasta){
 const occNombre=o=>o.p.concepto+(o.n?` · cuota ${o.n} de ${o.tot}`:'');
 const tagMedio=n=>n?`<span class="pill" style="background:var(--accent-bg);color:var(--accent);margin-left:6px;font-weight:700">${esc(n)}</span>`:'';
 function vencTexto(v){const p=S.programados[v.prog];if(!p)return'vencimiento borrado';const o=ocurrencias('2100-01-01').find(x=>x.prog===v.prog&&x.k===v.k);return (o?occNombre(o):p.concepto)+' del '+fmtFc(o?o.fecha:v.k)}
-// Opciones de vencimiento al cargar un egreso: pendientes de la misma cuenta (o categoría), vencidos o de los próximos 30 días.
+// Opciones de vencimiento al cargar un egreso: solo pendientes de la cuenta elegida (o de la categoría si no hay cuenta), vencidos o de los próximos 30 días.
 function pintarVenc(d,q){
-  const box=q('#fv');if(!box)return;
+  const box=q('#fv');if(!box)return;const wrap=q('#fvw');
+  // Sin cuenta ni categoría elegida no se muestra nada: evita elegir un vencimiento que no tiene nada que ver.
+  if(!d.cuenta&&!d.categoria&&!d.venc){wrap.classList.add('hidden');box.innerHTML='';return}
   const lim=addDias(hoy(),30);
   let l=ocurrencias(lim).filter(o=>!o.pagado);
-  if(d.cuenta)l=l.filter(o=>o.p.cuenta===d.cuenta||(!o.p.cuenta&&d.categoria&&o.p.categoria===d.categoria));else if(d.categoria)l=l.filter(o=>o.p.categoria===d.categoria);else l=l.filter(o=>o.fecha<=addDias(hoy(),7));
+  if(d.cuenta)l=l.filter(o=>o.p.cuenta===d.cuenta||(!o.p.cuenta&&d.categoria&&o.p.categoria===d.categoria));else if(d.categoria)l=l.filter(o=>o.p.categoria===d.categoria);else l=[];
   l=l.slice(0,6);
   if(d.venc&&!l.find(o=>o.prog===d.venc.prog&&o.k===d.venc.k)){const o=ocurrencias('2100-01-01').find(o=>o.prog===d.venc.prog&&o.k===d.venc.k);if(o)l.unshift(o)}
+  // Si esa cuenta/categoría no tiene vencimientos pendientes, se oculta la pregunta entera.
+  if(!l.length){wrap.classList.add('hidden');box.innerHTML='';return}
+  wrap.classList.remove('hidden');
   box.innerHTML=`<button class="chip ${!d.venc?'on':''}" data-v="">No corresponde</button>`+l.map(o=>`<button class="chip ${d.venc&&d.venc.prog===o.prog&&d.venc.k===o.k?'on':''}" data-v="${o.prog}|${o.k}">${esc(occNombre(o))} · ${fmtFc(o.fecha)} · ${money(o.monto,o.moneda)}</button>`).join('');
-  if(!l.length)box.innerHTML+=`<span class="sub" style="align-self:center">No hay vencimientos pendientes${d.cuenta?' de esta cuenta':d.categoria?' de esta categoría':' esta semana'}.</span>`;
   box.querySelectorAll('.chip').forEach(b=>b.onclick=()=>{
     if(!b.dataset.v){d.venc=null}else{const[prog,k]=b.dataset.v.split('|');d.venc={prog,k};const o=l.find(x=>x.prog===prog&&x.k===k);
       if(o&&!parseMonto(d.monto)){d.monto=(Math.round(o.monto*100)/100).toLocaleString('es-AR');q('#fm').value=d.monto;d.moneda=o.moneda;q('#fm').dispatchEvent(new Event('input'))}}
