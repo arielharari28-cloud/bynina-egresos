@@ -164,6 +164,7 @@ function iniciarDatos(){
   db.ref(ROOT+'/cargos').on('value',s=>{S.cargos=s.val()||{};render()});
   db.ref(ROOT+'/programados').on('value',s=>{S.programados=s.val()||{};render()});
   db.ref(ROOT+'/ocurrencias').on('value',s=>{S.ocurr=s.val()||{};render()});
+  db.ref(ROOT+'/conciliacion').on('value',s=>{S.conc=s.val()||{};if(S.view==='mov'&&S.movModo==='dia')render()});
   db.ref(ROOT+'/caja').on('value',async s=>{const v=s.val()||{};
     if(!v.fuentes){const up={};['Nina Cya - Credicoop','Efectivo local','Mercado Pago'].forEach((n,i)=>up['fuentes/'+uid()]={nombre:n,orden:i,saldo:0});await db.ref(ROOT+'/caja').update(up);return}
     S.caja=v;if(S.view==='agenda'&&S.agModo==='caja')render()});
@@ -397,6 +398,7 @@ function estadoPill(e,id){
   return `<span class="pill p-na">Sin cta. cte.</span>`;
 }
 function vMov(){
+  if(S.movModo==='dia')return vMovDia();
   const sem=rango('semana',0),mes=rango('mes',0);
   let l=listaEgresos();
   const npend=l.filter(e=>e.estado==='pendiente').length;
@@ -408,7 +410,7 @@ function vMov(){
   l.sort((a,b)=>b.fecha.localeCompare(a.fecha)||(b.ts||0)-(a.ts||0));
   const total=l.reduce((s,e)=>s+ars(e),0);
   const f=[['todos','Todos'],['pend',`Pendientes de bajar (${npend})`],['sem','Esta semana'],['mes','Este mes']];
-  $('#vista').innerHTML=`<div class="chips" style="margin-bottom:10px">${f.map(([k,t])=>`<button class="chip ${S.movFiltro===k?'on':''}" data-f="${k}">${t}</button>`).join('')}</div>
+  $('#vista').innerHTML=`${movModoToggle()}<div class="chips" style="margin-bottom:10px">${f.map(([k,t])=>`<button class="chip ${S.movFiltro===k?'on':''}" data-f="${k}">${t}</button>`).join('')}</div>
   <input id="mb" placeholder="Buscar por nota, cuenta, categoría o monto" value="${esc(S.movBusca)}" style="margin-bottom:10px">
   <div class="hdr" style="margin-bottom:8px"><span class="sub">${l.length} movimientos</span><span class="num" style="font-weight:700">${money(total)}</span></div>
   ${l.length?`<div class="list">${l.slice(0,S.movLimite).map(e=>`<div class="row" data-id="${e.id}">
@@ -417,11 +419,82 @@ function vMov(){
     <div style="text-align:right"><div class="num" style="font-weight:700">${money(e.monto,e.moneda)}</div>${e.moneda==='USD'?`<div class="sub num">≈ ${money(ars(e))}</div>`:''}<div style="margin-top:4px">${estadoPill(e,e.id)}</div></div></div>`).join('')}</div>
     ${l.length>S.movLimite?`<button id="mas" style="width:100%;margin-top:10px">Ver más</button>`:''}`
   :`<div class="empty">No hay movimientos con este filtro.</div>`}`;
+  bindMovModo();
   document.querySelectorAll('[data-f]').forEach(x=>x.onclick=()=>{S.movFiltro=x.dataset.f;S.movLimite=150;render()});
   const mb=$('#mb');mb.oninput=e=>{S.movBusca=e.target.value;clearTimeout(mb._t);mb._t=setTimeout(()=>{render();const n=$('#mb');n.focus();n.setSelectionRange(n.value.length,n.value.length)},350)};
   document.querySelectorAll('.row[data-id]').forEach(r=>r.onclick=()=>abrirEgreso(r.dataset.id));
   document.querySelectorAll('[data-baja]').forEach(x=>x.onclick=async ev=>{ev.stopPropagation();await db.ref(ROOT+'/egresos/'+x.dataset.baja).update({estado:'bajado',bajadoPor:S.user,bajadoTs:Date.now()});logAcc('bajado','egreso',x.dataset.baja,resEg(S.egresos[x.dataset.baja]));toast('Marcado como bajado')});
   const m=$('#mas');if(m)m.onclick=()=>{S.movLimite+=150;render()};
+}
+
+// ---------- MOVIMIENTOS POR DÍA (conciliación de egresos) ----------
+// Agrupa los egresos por día y por medio de pago para compararlos con el sistema de gestión.
+// Los cheques/echeq se ubican el día que VENCEN (cuando se debitan), no el día que se firmaron.
+// No incluye los egresos "anteriores, no suman" (soloAgenda). La tilde de conciliado queda en
+// conciliacion/{fecha}/{medioId} con quién y cuándo.
+function movModoToggle(){return `<div class="chips" style="margin-bottom:10px"><button class="chip ${S.movModo!=='dia'?'on':''}" data-mm="lista">Lista</button><button class="chip ${S.movModo==='dia'?'on':''}" data-mm="dia">Por día</button></div>`}
+function bindMovModo(){document.querySelectorAll('[data-mm]').forEach(x=>x.onclick=()=>{S.movModo=x.dataset.mm;render()})}
+function fechaCaja(e){return e.cheque&&e.cheque.venc?e.cheque.venc:e.fecha}
+function diaLargo(f){const d=fromIso(f).toLocaleDateString('es-AR',{weekday:'long',day:'numeric',month:'numeric'});return d.charAt(0).toUpperCase()+d.slice(1)}
+function vMovDia(){
+  if(!S.diaDesde||!S.diaHasta){S.diaDesde=hoy();S.diaHasta=hoy()}
+  if(S.diaDesde>S.diaHasta){const t=S.diaDesde;S.diaDesde=S.diaHasta;S.diaHasta=t}
+  const med=S.diaMedio||'';
+  let l=listaEgresos().filter(e=>!e.soloAgenda).map(e=>({...e,fc:fechaCaja(e)})).filter(e=>e.fc>=S.diaDesde&&e.fc<=S.diaHasta);
+  if(med)l=l.filter(e=>e.medio===med);
+  const dias={};l.forEach(e=>{(dias[e.fc]=dias[e.fc]||[]).push(e)});
+  const fechas=Object.keys(dias).sort((a,b)=>b.localeCompare(a));
+  const total=l.reduce((a,e)=>a+ars(e),0);
+  const ordMed=id=>(S.cfg.medios?.[id]?.orden)??99;
+  const t=hoy(),ay=addDias(t,-1),sem=rango('semana',0),mes=rango('mes',0);
+  const atajos=[['hoy','Hoy',t,t],['ayer','Ayer',ay,ay],['sem','Esta semana',sem.desde,sem.hasta],['mes','Este mes',mes.desde,mes.hasta]];
+  const medios=activos(S.cfg.medios);
+  const bloques=fechas.map(f=>{
+    const porMed={};dias[f].forEach(e=>{const k=e.medio||'_';(porMed[k]=porMed[k]||[]).push(e)});
+    const tDia=dias[f].reduce((a,e)=>a+ars(e),0);
+    const meds=Object.keys(porMed).sort((a,b)=>ordMed(a)-ordMed(b));
+    const nConc=meds.filter(m=>S.conc?.[f]?.[m]).length;
+    return `<div class="card" style="padding:0;overflow:hidden">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 14px;background:#fafbfc;border-bottom:1px solid var(--line)">
+        <div><div style="font-weight:700">${diaLargo(f)}</div><div class="sub">${dias[f].length} movimiento${dias[f].length!==1?'s':''} · ${nConc===meds.length?'<span style="color:var(--ok);font-weight:700">✓ conciliado</span>':nConc?`${nConc} de ${meds.length} medios conciliados`:'sin conciliar'}</div></div>
+        <div class="num" style="font-weight:700;font-size:17px">${money(tDia)}</div>
+      </div>
+      ${meds.map(m=>{
+        const es=porMed[m],tm=es.reduce((a,e)=>a+ars(e),0),c=S.conc?.[f]?.[m];
+        return `<div style="border-bottom:1px solid var(--line)">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 14px">
+            <label style="display:flex;align-items:center;gap:8px;margin:0;color:var(--ink);font-size:14px;cursor:pointer">
+              <input type="checkbox" data-conc="${f}|${m}" ${c?'checked':''} style="width:20px;height:20px;margin:0">
+              <span><b>${esc(medNom(m)||'Sin medio')}</b>${c?`<span class="sub" style="display:block;margin:0">conciliado por ${esc(USERS[c.por]?.nombre||c.por||'')}</span>`:''}</span>
+            </label>
+            <span class="num" style="font-weight:700">${money(tm)}</span>
+          </div>
+          ${es.sort((a,b)=>(a.ts||0)-(b.ts||0)).map(e=>`<div class="row" data-id="${e.id}" style="padding:8px 14px 8px 42px;border-bottom:0">
+            <div style="min-width:0"><div style="font-size:14px">${esc(ctaNom(e.cuenta)||e.nota||catNom(e.categoria))}</div>
+            <div class="sub">${esc(catNom(e.categoria))}${e.cheque?' · N° '+esc(e.cheque.num)+' firmado '+fmtFc(e.fecha):''}${e.nota&&e.cuenta?' · '+esc(e.nota):''}</div></div>
+            <div style="text-align:right"><div class="num" style="font-size:14px">${money(e.monto,e.moneda)}</div>${e.moneda==='USD'?`<div class="sub num">≈ ${money(ars(e))}</div>`:''}</div>
+          </div>`).join('')}
+        </div>`}).join('')}
+    </div>`}).join('');
+  // Resumen del rango por medio (útil cuando se elige más de un día)
+  const resMed={};l.forEach(e=>{const k=e.medio||'_';resMed[k]=(resMed[k]||0)+ars(e)});
+  const resumen=S.diaDesde!==S.diaHasta&&l.length?`<div class="card"><div class="sub" style="margin:0 0 6px">Total del período por medio</div>${Object.keys(resMed).sort((a,b)=>ordMed(a)-ordMed(b)).map(m=>`<div style="display:flex;justify-content:space-between;padding:3px 0"><span>${esc(medNom(m)||'Sin medio')}</span><span class="num">${money(resMed[m])}</span></div>`).join('')}</div>`:'';
+  $('#vista').innerHTML=`${movModoToggle()}
+  <div class="chips" style="margin-bottom:8px">${atajos.map(([k,tx,d,h])=>`<button class="chip ${S.diaDesde===d&&S.diaHasta===h?'on':''}" data-at="${d}|${h}">${tx}</button>`).join('')}</div>
+  <div class="grid2" style="margin-bottom:8px"><div><label for="dd" style="margin:0 0 4px">Desde</label><input id="dd" type="date" value="${S.diaDesde}"></div><div><label for="dh" style="margin:0 0 4px">Hasta</label><input id="dh" type="date" value="${S.diaHasta}"></div></div>
+  <div class="chips" style="margin-bottom:10px"><button class="chip ${!med?'on':''}" data-md="">Todos los medios</button>${medios.map(([id,c])=>`<button class="chip ${med===id?'on':''}" data-md="${id}">${esc(c.nombre)}</button>`).join('')}</div>
+  <div class="hdr" style="margin-bottom:8px;display:flex;justify-content:space-between"><span class="sub">${l.length} movimientos · ${fechas.length} día${fechas.length!==1?'s':''}</span><span class="num" style="font-weight:700">${money(total)}</span></div>
+  ${resumen}
+  ${bloques||'<div class="empty">No hay egresos en esas fechas.</div>'}
+  <div class="sub" style="margin-top:8px">Los cheques y echeq aparecen el día que vencen.</div>`;
+  bindMovModo();
+  document.querySelectorAll('[data-at]').forEach(x=>x.onclick=()=>{const[d,h]=x.dataset.at.split('|');S.diaDesde=d;S.diaHasta=h;render()});
+  $('#dd').onchange=e=>{if(e.target.value){S.diaDesde=e.target.value;render()}};
+  $('#dh').onchange=e=>{if(e.target.value){S.diaHasta=e.target.value;render()}};
+  document.querySelectorAll('[data-md]').forEach(x=>x.onclick=()=>{S.diaMedio=x.dataset.md;render()});
+  document.querySelectorAll('[data-conc]').forEach(x=>x.onchange=async()=>{const[f,m]=x.dataset.conc.split('|');
+    await db.ref(ROOT+'/conciliacion/'+f+'/'+m).set(x.checked?{por:S.user,ts:Date.now()}:null);toast(x.checked?'Marcado como conciliado':'Conciliación quitada')});
+  document.querySelectorAll('.row[data-id]').forEach(r=>r.onclick=()=>abrirEgreso(r.dataset.id));
 }
 
 // ---------- CUENTAS ----------
