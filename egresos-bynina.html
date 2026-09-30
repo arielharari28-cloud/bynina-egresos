@@ -400,22 +400,26 @@ function estadoPill(e,id){
 function vMov(){
   if(S.movModo==='dia')return vMovDia();
   const sem=rango('semana',0),mes=rango('mes',0);
-  let l=listaEgresos();
-  const npend=l.filter(e=>e.estado==='pendiente').length;
+  // Los cheques/echeq entran a Movimientos recién cuando se marcan debitados, con la fecha del
+  // débito (fCaja). Los firmados sin debitar quedan aparte, en el filtro "Cheques sin debitar".
+  const todosEg=listaEgresos().map(e=>({...e,fc:fCaja(e)}));
+  const chSinDeb=todosEg.filter(e=>e.cheque&&!e.cheque.debitado);
+  let l=S.movFiltro==='chq'?chSinDeb.map(e=>({...e,fc:e.cheque.venc||e.fecha})):todosEg.filter(e=>e.fc);
+  const npend=todosEg.filter(e=>e.fc&&e.estado==='pendiente').length;
   if(S.movFiltro==='pend')l=l.filter(e=>e.estado==='pendiente');
-  if(S.movFiltro==='sem')l=l.filter(e=>enRango(e.fecha,sem));
-  if(S.movFiltro==='mes')l=l.filter(e=>enRango(e.fecha,mes));
+  if(S.movFiltro==='sem')l=l.filter(e=>enRango(e.fc,sem));
+  if(S.movFiltro==='mes')l=l.filter(e=>enRango(e.fc,mes));
   const b=S.movBusca.trim().toLowerCase();
   if(b)l=l.filter(e=>[e.nota,catNom(e.categoria),ctaNom(e.cuenta),medNom(e.medio),String(e.monto)].join(' ').toLowerCase().includes(b));
-  l.sort((a,b)=>b.fecha.localeCompare(a.fecha)||(b.ts||0)-(a.ts||0));
+  l.sort((a,b)=>S.movFiltro==='chq'?a.fc.localeCompare(b.fc):(b.fc.localeCompare(a.fc)||(b.ts||0)-(a.ts||0)));
   const total=l.reduce((s,e)=>s+ars(e),0);
-  const f=[['todos','Todos'],['pend',`Pendientes de bajar (${npend})`],['sem','Esta semana'],['mes','Este mes']];
+  const f=[['todos','Todos'],['pend',`Pendientes de bajar (${npend})`],['sem','Esta semana'],['mes','Este mes'],['chq',`Cheques sin debitar (${chSinDeb.length})`]];
   $('#vista').innerHTML=`${movModoToggle()}<div class="chips" style="margin-bottom:10px">${f.map(([k,t])=>`<button class="chip ${S.movFiltro===k?'on':''}" data-f="${k}">${t}</button>`).join('')}</div>
   <input id="mb" placeholder="Buscar por nota, cuenta, categoría o monto" value="${esc(S.movBusca)}" style="margin-bottom:10px">
   <div class="hdr" style="margin-bottom:8px"><span class="sub">${l.length} movimientos</span><span class="num" style="font-weight:700">${money(total)}</span></div>
   ${l.length?`<div class="list">${l.slice(0,S.movLimite).map(e=>`<div class="row" data-id="${e.id}">
     <div style="min-width:0"><div style="font-weight:700">${esc(ctaNom(e.cuenta)||e.nota||catNom(e.categoria))}</div>
-    <div class="sub">${fmtFc(e.fecha)} · ${esc(catNom(e.categoria))} · ${esc(medNom(e.medio))}${e.cheque?' N° '+esc(e.cheque.num)+' vence '+fmtFc(e.cheque.venc):''}${e.soloAgenda?' · anterior, no suma':''}${USERS[e.creadoPor]?' · '+USERS[e.creadoPor].nombre:''}${e.nota&&e.cuenta?' · '+esc(e.nota):''}</div></div>
+    <div class="sub">${fmtFc(e.fc)} · ${esc(catNom(e.categoria))} · ${esc(medNom(e.medio))}${e.cheque?' N° '+esc(e.cheque.num)+(e.cheque.debitado?' debitado · firmado '+fmtFc(e.fecha):' vence '+fmtFc(e.cheque.venc)+' · sin debitar'):''}${e.soloAgenda?' · anterior, no suma':''}${USERS[e.creadoPor]?' · '+USERS[e.creadoPor].nombre:''}${e.nota&&e.cuenta?' · '+esc(e.nota):''}</div></div>
     <div style="text-align:right"><div class="num" style="font-weight:700">${money(e.monto,e.moneda)}</div>${e.moneda==='USD'?`<div class="sub num">≈ ${money(ars(e))}</div>`:''}<div style="margin-top:4px">${estadoPill(e,e.id)}</div></div></div>`).join('')}</div>
     ${l.length>S.movLimite?`<button id="mas" style="width:100%;margin-top:10px">Ver más</button>`:''}`
   :`<div class="empty">No hay movimientos con este filtro.</div>`}`;
@@ -440,7 +444,8 @@ function vMovDia(){
   if(!S.diaDesde||!S.diaHasta){S.diaDesde=hoy();S.diaHasta=hoy()}
   if(S.diaDesde>S.diaHasta){const t=S.diaDesde;S.diaDesde=S.diaHasta;S.diaHasta=t}
   const med=S.diaMedio||'';
-  let l=listaEgresos().filter(e=>!e.soloAgenda).map(e=>({...e,fc:fechaCaja(e)})).filter(e=>e.fc>=S.diaDesde&&e.fc<=S.diaHasta);
+  let l=listaEgresos().filter(e=>!e.soloAgenda).map(e=>({...e,fc:fCaja(e)})).filter(e=>e.fc&&e.fc>=S.diaDesde&&e.fc<=S.diaHasta);
+  const nChSinDeb=listaEgresos().filter(e=>!e.soloAgenda&&e.cheque&&!e.cheque.debitado&&e.cheque.venc>=S.diaDesde&&e.cheque.venc<=S.diaHasta).length;
   if(med)l=l.filter(e=>e.medio===med);
   const dias={};l.forEach(e=>{(dias[e.fc]=dias[e.fc]||[]).push(e)});
   const fechas=Object.keys(dias).sort((a,b)=>b.localeCompare(a));
@@ -486,7 +491,7 @@ function vMovDia(){
   <div class="hdr" style="margin-bottom:8px;display:flex;justify-content:space-between"><span class="sub">${l.length} movimientos · ${fechas.length} día${fechas.length!==1?'s':''}</span><span class="num" style="font-weight:700">${money(total)}</span></div>
   ${resumen}
   ${bloques||'<div class="empty">No hay egresos en esas fechas.</div>'}
-  <div class="sub" style="margin-top:8px">Los cheques y echeq aparecen el día que vencen.</div>`;
+  <div class="sub" style="margin-top:8px">Los cheques y echeq aparecen recién cuando se marcan debitados en la Agenda, el día del débito.${nChSinDeb?` Hay ${nChSinDeb} que vence${nChSinDeb!==1?'n':''} en estas fechas y todavía no está${nChSinDeb!==1?'n':''} marcado${nChSinDeb!==1?'s':''} como debitado${nChSinDeb!==1?'s':''}.`:''}</div>`;
   bindMovModo();
   document.querySelectorAll('[data-at]').forEach(x=>x.onclick=()=>{const[d,h]=x.dataset.at.split('|');S.diaDesde=d;S.diaHasta=h;render()});
   $('#dd').onchange=e=>{if(e.target.value){S.diaDesde=e.target.value;render()}};
