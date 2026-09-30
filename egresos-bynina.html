@@ -629,7 +629,8 @@ function vRep(){
   <h3>Por categoría</h3>
   ${cats.length?`<div class="card">${cats.map(c=>{const a=porCat[c]||0,p=porCatP[c]||0;return `<div style="margin-bottom:12px"><div class="hdr"><span>${esc(catNom(c))}</span><span class="num">${money(a)} ${dTxt(dlt(a,p))}</span></div>
   <div class="bar"><div style="width:${Math.round(a/mx*100)}%"></div></div><div class="sub">Anterior: ${money(p)}</div></div>`}).join('')}</div>`:'<div class="empty">No hay egresos en este período.</div>'}
-  ${deuda.length?`<h3>Devolución de deuda</h3><div class="row list" style="cursor:default"><span>${deuda.length} pagos · no suman como gasto</span><span class="num" style="font-weight:700">${money(sumar(deuda))}</span></div>`:''}
+  ${deuda.length?`<h3>Devolución de deuda</h3><div class="row list" id="rdeuda"><span>${deuda.length} pagos · no suman como gasto <span class="sub">${S.repDeudaAb?'▲ ocultar':'▼ ver cuáles'}</span></span><span class="num" style="font-weight:700">${money(sumar(deuda))}</span></div>
+  ${S.repDeudaAb?`<div class="list" style="margin-top:6px">${[...deuda].sort((x,y)=>y.fecha.localeCompare(x.fecha)).map(e=>`<div class="row" data-rd="${e.id}"><div style="min-width:0"><div style="font-weight:700">${esc(ctaNom(e.cuenta)||e.nota||catNom(e.categoria))}</div><div class="sub">${fmtFc(e.fecha)} · ${esc(catNom(e.categoria))} · ${esc(medNom(e.medio))}${e.cheque?' N° '+esc(e.cheque.num):''}${e.nota&&e.cuenta?' · '+esc(e.nota):''}</div></div><div class="num" style="font-weight:700">${money(e.monto,e.moneda)}</div></div>`).join('')}</div>`:''}`:''}
   ${chFut.length?`<div class="row list" style="cursor:default;margin-top:10px"><span>${chFut.length} cheques sin debitar · se suman cuando se marcan debitados</span><span class="num" style="font-weight:700">${money(sumar(chFut))}</span></div>`:''}
   <h3>Por medio de pago</h3>
   <div class="list">${Object.entries(porMed).sort((a,b)=>b[1]-a[1]).map(([m,v])=>`<div class="row" style="cursor:default"><span>${esc(medNom(m)||'Sin medio')}</span><span class="num">${money(v)}</span></div>`).join('')||'<div class="empty">Sin datos.</div>'}</div>
@@ -638,6 +639,8 @@ function vRep(){
   document.querySelectorAll('[data-m]').forEach(x=>x.onclick=()=>{S.repModo=x.dataset.m;S.repOffset=0;render()});
   $('#rprev').onclick=()=>{S.repOffset--;render()};$('#rnext').onclick=()=>{if(S.repOffset<0){S.repOffset++;render()}};
   $('#rpend').onclick=()=>{S.view='mov';S.movFiltro='pend';render()};
+  const rd=$('#rdeuda');if(rd)rd.onclick=()=>{S.repDeudaAb=!S.repDeudaAb;render()};
+  document.querySelectorAll('[data-rd]').forEach(r=>r.onclick=()=>abrirEgreso(r.dataset.rd));
 }
 
 // ---------- AJUSTES ----------
