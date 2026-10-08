@@ -1026,6 +1026,8 @@ function porMesHtml(){
 // con meses/{YYYY-MM} para los montos cambiados de un mes. Se compara contra lo gastado real del mes.
 const mesAdd=(m,n)=>{const d=fromIso(m+'-01');return iso(new Date(d.getFullYear(),d.getMonth()+n,1)).slice(0,7)};
 // Aumentos: aumentos/{YYYY-MM}=monto rige desde ese mes en adelante; los meses anteriores quedan con el monto que tenían.
+const UNIDADES=['Avellaneda','Depósito y venta online','Fábrica','Estampería','General'];
+const unidadDe=p=>UNIDADES.includes(p.unidad)?p.unidad:'General';
 function montoVigente(p,m){let v=Number(p.monto),k0='';Object.entries(p.aumentos||{}).forEach(([k,x])=>{if(k<=m&&k>=k0){k0=k;v=Number(x)}});return v}
 function historialMontos(p){return [[p.desde,Number(p.monto)],...Object.entries(p.aumentos||{}).map(([k,x])=>[k,Number(x)])].sort((a,b)=>b[0].localeCompare(a[0]))}
 const mesesEntre=(a,b)=>{const x=fromIso(a+'-01'),y=fromIso(b+'-01');return (y.getFullYear()-x.getFullYear())*12+y.getMonth()-x.getMonth()};
@@ -1045,16 +1047,23 @@ function pronoHtml(){
   const act=Object.entries(S.prono||{}).filter(([,p])=>p&&p.activo!==false&&(!p.hasta||p.hasta>=t)).map(([id,p])=>{const ref=p.desde>t?p.desde:t,h=historialMontos(p).filter(x=>x[0]<=ref);
     return {id,p,monto:montoVigente(p,ref),moneda:p.moneda||'ARS',ult:h[0],ant:h[1],futuro:p.desde>t}});
   const porCat={};act.forEach(o=>(porCat[o.p.categoria||'_']=porCat[o.p.categoria||'_']||[]).push(o));
-  const totHoy=sumar(act.filter(o=>!o.futuro));
-  const lista=act.length?`<div class="list">${Object.entries(porCat).sort((a,b)=>sumar(b[1])-sumar(a[1])).map(([c,x])=>`<div class="row" style="background:#fafbfc;cursor:default"><span style="font-weight:700">${esc(c==='_'?'Sin categoría':catNom(c)||'Sin categoría')}</span><span class="num" style="font-weight:700">${money(sumar(x.filter(o=>!o.futuro)))}</span></div>`
-    +x.sort((a,b)=>ars(b)-ars(a)).map(o=>{const viejo=!o.futuro&&mesesEntre(o.ult[0],t)>=4;
-      const sub=o.futuro?'arranca en '+mesCorto(o.p.desde):viejo?`<span style="color:#b45309">sin actualizar hace ${mesesEntre(o.ult[0],t)} meses</span>`:'desde '+mesCorto(o.ult[0])+(o.ant?' · antes '+money(o.ant[1],o.moneda):'');
-      return `<div class="row" data-pr="${o.id}" style="padding-left:24px;align-items:center"><div style="min-width:0"><div>${esc(o.p.concepto)}</div><div class="sub" style="margin:0">${sub}${o.p.hasta?' · hasta '+mesCorto(o.p.hasta):''}</div></div><div class="num">${money(o.monto,o.moneda)}</div></div>`}).join('')).join('')}
+  const vig=x=>sumar(x.filter(o=>!o.futuro)),totHoy=vig(act);S.prUniAb=S.prUniAb||{};
+  const head=(attr,ab,tit,n,monto,ind)=>`<button ${attr} class="row" style="width:100%;border:0;border-bottom:1px solid var(--line);border-radius:0;${ind?'padding-left:30px;background:#fff':'background:#fafbfc'};align-items:center"><span style="display:flex;gap:8px;align-items:center"><span style="width:14px;color:var(--muted)">${ab?'▾':'▸'}</span><span style="font-weight:${ind?600:700}">${tit}</span>${n!=null?`<span class="sub" style="margin:0">${n}</span>`:''}</span><span class="num" style="font-weight:700">${money(monto)}</span></button>`;
+  const fila=(o,ind)=>{const viejo=!o.futuro&&mesesEntre(o.ult[0],t)>=4;
+    const sub=o.futuro?'arranca en '+mesCorto(o.p.desde):viejo?`<span style="color:#b45309">sin actualizar hace ${mesesEntre(o.ult[0],t)} meses</span>`:'desde '+mesCorto(o.ult[0])+(o.ant?' · antes '+money(o.ant[1],o.moneda):'');
+    return `<div class="row" data-pr="${o.id}" style="padding-left:${ind}px;align-items:center"><div style="min-width:0"><div>${esc(o.p.concepto)}</div><div class="sub" style="margin:0">${sub}${o.p.hasta?' · hasta '+mesCorto(o.p.hasta):''}</div></div><div class="num">${money(o.monto,o.moneda)}</div></div>`};
+  const porUni=x=>{const g={};x.forEach(o=>(g[unidadDe(o.p)]=g[unidadDe(o.p)]||[]).push(o));return UNIDADES.filter(u=>g[u]).map(u=>[u,g[u]])};
+  const resumen=act.length?`<div class="card" style="margin-bottom:12px"><div style="font-weight:700;margin-bottom:4px">Costo fijo por unidad de negocio</div>${porUni(act.filter(o=>!o.futuro)).map(([u,x])=>`<div style="display:flex;justify-content:space-between;padding:4px 0;border-top:1px solid var(--line)"><span>${u}</span><span class="num">${money(sumar(x))}</span></div>`).join('')}</div>`:'';
+  const lista=act.length?`<div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:6px"><button id="fabr" style="padding:6px 10px;font-size:13px">Abrir todo</button><button id="fcer" style="padding:6px 10px;font-size:13px">Cerrar todo</button></div>
+    <div class="list">${Object.entries(porCat).sort((a,b)=>vig(b[1])-vig(a[1])).map(([c,x])=>{const ab=!!S.prCatAb[c];x.sort((a,b)=>ars(b)-ars(a));
+      let cuerpo='';if(ab){const us=porUni(x);
+        cuerpo=us.length>1?us.map(([u,y])=>{const k=c+'|'+u,ua=!!S.prUniAb[k];return head(`data-pru="${esc(k)}"`,ua,u,null,vig(y),1)+(ua?y.map(o=>fila(o,48)).join(''):'')}).join(''):x.map(o=>fila(o,36)).join('')}
+      return head(`data-prc="${c}"`,ab,esc(c==='_'?'Sin categoría':catNom(c)||'Sin categoría'),x.length,vig(x))+cuerpo}).join('')}
     <div class="row" style="cursor:default;border-top:2px solid var(--line)"><span style="font-weight:700">Total por mes</span><span class="num" style="font-weight:700">${money(totHoy)}</span></div></div>`
     :'<div class="empty">Cargá tus gastos fijos (alquileres de cada sucursal, sueldos) para saber más o menos cuánto gastás por mes. No se agendan: son solo para prever.</div>';
   const m=S.pronoMes||t,l=pronoDelMes(m),tot=sumar(l),real=gastoRealMes(m);
   const prox=[0,1,2,3,4,5].map(i=>mesAdd(t,i));
-  return `${lista}
+  return `${resumen}${lista}
     <button id="prnew" class="pri" style="width:100%;margin-top:10px">Agregar gasto fijo</button>
     <h3 style="margin-top:20px">Mes a mes</h3>
     <div class="hdr card" style="padding:8px"><button id="prprev" aria-label="Mes anterior">‹</button><span style="font-weight:700;text-align:center">${mesNom(m+'-01')}</span><button id="prnext" aria-label="Mes siguiente">›</button></div>
@@ -1071,10 +1080,12 @@ function bindProno(){
   document.querySelectorAll('[data-pr]').forEach(r=>r.onclick=()=>abrirFijo(r.dataset.pr));
   document.querySelectorAll('[data-prt]').forEach(b=>b.onclick=()=>{const k=b.dataset.prt;if(k==='ch')S.prChAb=!S.prChAb;else if(k==='pa')S.prPaAb=!S.prPaAb;else S.prAgAb=!S.prAgAb;render()});
   document.querySelectorAll('[data-prc]').forEach(b=>b.onclick=()=>{S.prCatAb[b.dataset.prc]=!S.prCatAb[b.dataset.prc];render()});
+  document.querySelectorAll('[data-pru]').forEach(b=>b.onclick=()=>{S.prUniAb[b.dataset.pru]=!S.prUniAb[b.dataset.pru];render()});
+  const fa=$('#fabr');if(fa){const todo=v=>{Object.values(S.prono||{}).forEach(p=>{if(!p)return;const c=p.categoria||'_';S.prCatAb[c]=v;S.prUniAb[c+'|'+unidadDe(p)]=v});render()};fa.onclick=()=>todo(true);$('#fcer').onclick=()=>todo(false)}
 }
 // Detalle de un gasto fijo: actualizar monto desde un mes (aumento) + historial.
 function abrirFijo(id){const p=S.prono[id];if(!p)return;const t=hoy().slice(0,7),mon=p.moneda||'ARS';
-  abrirModal(`<h2>${esc(p.concepto)}</h2><p class="sub">${esc(catNom(p.categoria)||'')} · hoy ${money(montoVigente(p,p.desde>t?p.desde:t),mon)}</p>
+  abrirModal(`<h2>${esc(p.concepto)}</h2><p class="sub">${esc(catNom(p.categoria)||'')} · ${unidadDe(p)} · hoy ${money(montoVigente(p,p.desde>t?p.desde:t),mon)}</p>
   <label for="anm">Nuevo monto</label><input id="anm" class="num" inputmode="decimal" placeholder="3.200.000" style="font-size:20px;font-weight:700">
   <label for="and">Desde el mes</label><input id="and" type="month" value="${mesAdd(t,1)}">
   <p class="sub">Los meses anteriores quedan con el monto que tenían.</p><div id="aerr" class="err"></div>
@@ -1098,10 +1109,12 @@ function abrirProno(id,mes){
   <label for="gm">${id?'Monto inicial (para aumentos usá "Guardar aumento")':'Monto por mes'}</label><input id="gm" class="num" inputmode="decimal" value="${p.monto?Number(p.monto).toLocaleString('es-AR'):''}" placeholder="250.000" style="font-size:20px;font-weight:700">
   <div class="chips" id="gmo" style="margin-top:8px"><button class="chip ${(p.moneda||'ARS')==='ARS'?'on':''}" data-v="ARS">Pesos</button><button class="chip ${p.moneda==='USD'?'on':''}" data-v="USD">Dólares</button></div>
   <label>Categoría</label><div class="chips" id="gca">${cats.map(([k,c])=>`<button class="chip ${p.categoria===k?'on':''}" data-id="${k}">${esc(c.nombre)}</button>`).join('')}</div>
+  <label>Unidad de negocio</label><div class="chips" id="gun">${UNIDADES.map(u=>`<button class="chip ${unidadDe(p)===u?'on':''}" data-u="${u}">${u}</button>`).join('')}</div>
   <div class="grid2"><div><label for="gd">Desde</label><input id="gd" type="month" value="${p.desde}"></div><div><label for="gh">Hasta (vacío = sin fin)</label><input id="gh" type="month" value="${p.hasta||''}"></div></div>
   <div id="gerr" class="err"></div>
   <div class="actions">${id?'<button id="gdel" style="color:var(--danger)">Borrar</button>':''}<button id="gcan">Cancelar</button><button class="pri" id="gok">Guardar</button></div>`);
-  let cat=p.categoria,mon=p.moneda||'ARS';
+  let cat=p.categoria,mon=p.moneda||'ARS',uni=unidadDe(p);
+  document.querySelectorAll('#gun .chip').forEach(b=>b.onclick=()=>{uni=b.dataset.u;document.querySelectorAll('#gun .chip').forEach(x=>x.classList.toggle('on',x===b))});
   document.querySelectorAll('#gmo .chip').forEach(b=>b.onclick=()=>{mon=b.dataset.v;document.querySelectorAll('#gmo .chip').forEach(x=>x.classList.toggle('on',x===b))});
   document.querySelectorAll('#gca .chip').forEach(b=>b.onclick=()=>{cat=b.dataset.id;document.querySelectorAll('#gca .chip').forEach(x=>x.classList.toggle('on',x===b))});
   ['#gm','#gov'].forEach(q=>{const el=$(q);if(el)el.onblur=e=>{const v=parseMonto(e.target.value);if(v)e.target.value=v.toLocaleString('es-AR')}});
@@ -1114,7 +1127,7 @@ function abrirProno(id,mes){
     if(!cat){$('#gerr').textContent='Elegí una categoría.';return}
     if(!desde){$('#gerr').textContent='Poné desde qué mes.';return}
     if(hasta&&hasta<desde){$('#gerr').textContent='"Hasta" no puede ser antes que "Desde".';return}
-    const rec={concepto,monto,moneda:mon,categoria:cat,desde,hasta,activo:true};
+    const rec={concepto,monto,moneda:mon,categoria:cat,unidad:uni,desde,hasta,activo:true};
     const rs=`${concepto} · ${money(monto,mon)} por mes desde ${mesNom(desde+'-01')}${hasta?' hasta '+mesNom(hasta+'-01'):''}`;
     if(id){rec.editadoPor=S.user;await db.ref(ROOT+'/pronostico/'+id).update(rec);logAcc('editar','pronostico',id,rs)}
     else{rec.creadoPor=S.user;rec.ts=Date.now();const nid=uid();await db.ref(ROOT+'/pronostico/'+nid).set(rec);logAcc('crear','pronostico',nid,rs)}
