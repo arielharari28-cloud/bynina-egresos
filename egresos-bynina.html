@@ -1101,13 +1101,14 @@ function chequesProvHtml(m,chm,chAb){
 }
 // Confirmación mensual: los gastos fijos marcados "confirmar cada mes" (por defecto los de categoría alquiler)
 // piden, al arrancar cada mes, confirmar que el monto sigue igual. Se guarda en confirmados/{YYYY-MM}.
-const esAlquilerCat=c=>/alquiler/i.test(catNom(c)||'');
+const esAlquilerCat=c=>/alquiler|sueldo/i.test(catNom(c)||'');
 const pideConfirmar=p=>p.confirmarMes!=null?!!p.confirmarMes:esAlquilerCat(p.categoria);
 function fijosAConfirmar(){const t=hoy().slice(0,7);return Object.entries(S.prono||{}).filter(([,p])=>p&&p.activo!==false&&pideConfirmar(p)&&p.desde<=t&&(!p.hasta||p.hasta>=t)&&!(p.confirmados||{})[t]&&!(p.aumentos||{})[t]&&p.desde!==t)}
 function confirmarFijosHtml(enVista){
   if(!isAdmin())return '';const l=fijosAConfirmar();if(!l.length)return '';const t=hoy().slice(0,7);
   if(!enVista)return `<button id="irconf" class="card" style="width:100%;text-align:left;border-color:#f59e0b;background:#fffbeb;margin-bottom:12px"><b>Confirmá ${l.length} gasto${l.length>1?'s':''} fijo${l.length>1?'s':''} de ${mesNom(t+'-01').toLowerCase()}</b><span class="sub" style="display:block;margin:2px 0 0">Revisá que el monto siga igual · tocá para ir</span></button>`;
-  return `<div class="card" style="border-color:#f59e0b;background:#fffbeb;margin-bottom:12px"><div style="font-weight:700;margin-bottom:4px">¿Siguen igual en ${mesNom(t+'-01').toLowerCase()}?</div>
+  return `<div class="card" style="border-color:#f59e0b;background:#fffbeb;margin-bottom:12px"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:4px"><span style="font-weight:700">¿Siguen igual en ${mesNom(t+'-01').toLowerCase()}?</span>${l.length>1?'<button id="cfall" class="pri" style="padding:6px 10px;font-size:13px">Todo sigue igual</button>':''}</div>
+    <div class="sub" style="margin:0 0 4px">Tocá "Cambió" en los que aumentaron y después "Todo sigue igual" para el resto.</div>
     ${l.map(([id,p])=>`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--line)"><div style="min-width:0"><div>${esc(p.concepto)}</div><div class="sub num" style="margin:0">${money(montoVigente(p,t),p.moneda||'ARS')}</div></div><div style="display:flex;gap:6px;flex:none"><button data-cfok="${id}" style="padding:6px 10px;font-size:13px">Sigue igual</button><button data-cfch="${id}" style="padding:6px 10px;font-size:13px">Cambió</button></div></div>`).join('')}</div>`;
 }
 function bindConfirmar(){
@@ -1115,6 +1116,9 @@ function bindConfirmar(){
   const ir=$('#irconf');if(ir)ir.onclick=()=>{S.view='agenda';S.agModo='prono';window.scrollTo(0,0);render()};
   document.querySelectorAll('[data-cfok]').forEach(b=>b.onclick=async()=>{const id=b.dataset.cfok,p=S.prono[id];await db.ref(ROOT+'/pronostico/'+id+'/confirmados/'+t).set(S.user);logAcc('editar','pronostico',id,`${p.concepto} · confirmó ${money(montoVigente(p,t),p.moneda||'ARS')} para ${mesNom(t+'-01')}`);toast('Confirmado')});
   document.querySelectorAll('[data-cfch]').forEach(b=>b.onclick=()=>abrirFijo(b.dataset.cfch,t));
+  const ca=$('#cfall');if(ca)ca.onclick=async()=>{const l=fijosAConfirmar();if(!confirm(`¿Confirmar los ${l.length} montos como están para ${mesNom(t+'-01').toLowerCase()}?`))return;
+    const up={};l.forEach(([id])=>up[id+'/confirmados/'+t]=S.user);await db.ref(ROOT+'/pronostico').update(up);
+    logAcc('editar','pronostico',null,`Confirmó ${l.length} gastos fijos sin cambios para ${mesNom(t+'-01')}`);toast('Todo confirmado')};
 }
 function abrirFijo(id,desdeMes){const p=S.prono[id];if(!p)return;const t=hoy().slice(0,7),mon=p.moneda||'ARS';
   abrirModal(`<h2>${esc(p.concepto)}</h2><p class="sub">${esc(catNom(p.categoria)||'')} · ${unidadDe(p)} · hoy ${money(montoVigente(p,p.desde>t?p.desde:t),mon)}</p>
@@ -1142,7 +1146,7 @@ function abrirProno(id,mes){
   <div class="chips" id="gmo" style="margin-top:8px"><button class="chip ${(p.moneda||'ARS')==='ARS'?'on':''}" data-v="ARS">Pesos</button><button class="chip ${p.moneda==='USD'?'on':''}" data-v="USD">Dólares</button></div>
   <label>Categoría</label><div class="chips" id="gca">${cats.map(([k,c])=>`<button class="chip ${p.categoria===k?'on':''}" data-id="${k}">${esc(c.nombre)}</button>`).join('')}</div>
   <label style="display:flex;gap:8px;align-items:center;color:var(--ink);font-size:14px;margin-top:10px"><input type="checkbox" id="gcf" ${pideConfirmar(p)?'checked':''} style="width:auto"> Pedir confirmar el monto cada mes</label>
-  <p class="sub" style="margin:2px 0 0">Viene tildado para alquileres. Al arrancar el mes te pregunta si sigue igual.</p>
+  <p class="sub" style="margin:2px 0 0">Viene tildado para alquileres y sueldos. Al arrancar el mes te pregunta si sigue igual.</p>
   <label>Unidad de negocio</label><div class="chips" id="gun">${UNIDADES.map(u=>`<button class="chip ${unidadDe(p)===u?'on':''}" data-u="${u}">${u}</button>`).join('')}</div>
   <div class="grid2"><div><label for="gd">Desde</label><input id="gd" type="month" value="${p.desde}"></div><div><label for="gh">Hasta (vacío = sin fin)</label><input id="gh" type="month" value="${p.hasta||''}"></div></div>
   <div id="gerr" class="err"></div>
