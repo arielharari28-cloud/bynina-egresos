@@ -202,12 +202,12 @@ function render(){
   const tabs=[['cargar','Cargar'],['agenda','Agenda'],['mov','Movim.'],['cuentas','Cuentas'+(nFact?` <span class="pill p-pend" style="padding:1px 6px">${nFact}</span>`:'')],['rep','Reportes'],['ajustes','Ajustes']].filter(([k])=>isAdmin()||k!=='rep');
   if(!isAdmin()&&S.view==='rep')S.view='cargar';
   $('#app').innerHTML=`<header><h1>Egresos By Nina</h1><span class="u">${USERS[S.user].nombre} · <a href="#" id="salir" style="color:inherit">Salir</a></span></header>
-  <div class="wrap">${bannerBackup()}${borradosHtml()}<div id="vista"></div></div>
+  <div class="wrap">${bannerBackup()}${borradosHtml()}${S.view==='agenda'&&S.agModo==='prono'?'':confirmarFijosHtml(false)}<div id="vista"></div></div>
   <nav>${tabs.map(([k,t])=>`<button data-v="${k}" class="${S.view===k||(k==='cuentas'&&S.view==='fact')?'on':''}">${t}</button>`).join('')}</nav>`;
   $('#salir').onclick=e=>{e.preventDefault();localStorage.removeItem('egr_user');S.user=null;render()};
   document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{S.view=b.dataset.v;if(b.dataset.v!=='cuentas')S.cuentaAbierta=null;window.scrollTo(0,0);render()});
   const bb=$('#bkbtn');if(bb)bb.onclick=descargarBackup;
-  bindBorrados();
+  bindBorrados();bindConfirmar();
   ({hist:vHist,fact:vFact,cargar:vCargar,agenda:vAgenda,mov:vMov,cuentas:vCuentas,rep:vRep,ajustes:vAjustes})[S.view]();
 }
 
@@ -1039,7 +1039,9 @@ function pronoDelMes(m){
 }
 // Lo que ya está en la agenda ese mes (pagos agendados y cheques por vencimiento), para no cargarlo dos veces.
 function agendaDelMes(m){const fin=iso(new Date(fromIso(m+'-01').getFullYear(),fromIso(m+'-01').getMonth()+1,0));return agendaItems(fin).filter(o=>o.fecha.slice(0,7)===m)}
-const totalMesPrevisto=m=>sumar(pronoDelMes(m));
+// Total previsto del mes = gastos fijos + cheques que vencen ese mes (los pagos agendados no, para no duplicar sueldos/alquileres).
+const chequesDelMes=m=>agendaDelMes(m).filter(o=>o.tipo==='cheque');
+const totalMesPrevisto=m=>sumar(pronoDelMes(m))+sumar(chequesDelMes(m));
 function gastoRealMes(m){return sumar(listaEgresos().filter(e=>!noGasto(e)).map(e=>Object.assign({},e,{fecha:fCaja(e)})).filter(e=>e.fecha&&e.fecha.slice(0,7)===m))}
 function pronoHtml(){
   const t=hoy().slice(0,7);S.prCatAb=S.prCatAb||{};
@@ -1061,16 +1063,18 @@ function pronoHtml(){
       return head(`data-prc="${c}"`,ab,esc(c==='_'?'Sin categoría':catNom(c)||'Sin categoría'),x.length,vig(x))+cuerpo}).join('')}
     <div class="row" style="cursor:default;border-top:2px solid var(--line)"><span style="font-weight:700">Total por mes</span><span class="num" style="font-weight:700">${money(totHoy)}</span></div></div>`
     :'<div class="empty">Cargá tus gastos fijos (alquileres de cada sucursal, sueldos) para saber más o menos cuánto gastás por mes. No se agendan: son solo para prever.</div>';
-  const m=S.pronoMes||t,l=pronoDelMes(m),tot=sumar(l),real=gastoRealMes(m);
+  const m=S.pronoMes||t,l=pronoDelMes(m),chm=chequesDelMes(m),tot=sumar(l)+sumar(chm),real=gastoRealMes(m),chAb=!!S.prChAb;
   const prox=[0,1,2,3,4,5].map(i=>mesAdd(t,i));
-  return `${resumen}${lista}
+  return `${confirmarFijosHtml(true)}${resumen}${lista}
     <button id="prnew" class="pri" style="width:100%;margin-top:10px">Agregar gasto fijo</button>
     <h3 style="margin-top:20px">Mes a mes</h3>
     <div class="hdr card" style="padding:8px"><button id="prprev" aria-label="Mes anterior">‹</button><span style="font-weight:700;text-align:center">${mesNom(m+'-01')}</span><button id="prnext" aria-label="Mes siguiente">›</button></div>
-    <div class="grid2" style="margin-bottom:8px"><div class="met"><div class="l">Gasto fijo estimado</div><div class="v num">${money(tot)}</div></div>
+    <div class="grid2" style="margin-bottom:8px"><div class="met"><div class="l">Total previsto del mes</div><div class="v num">${money(tot)}</div><div class="sub" style="margin:2px 0 0">fijos ${money(sumar(l))} · cheques ${money(sumar(chm))}</div></div>
     <div class="met"><div class="l">Gastado real del mes</div><div class="v num">${money(real)}</div></div></div>
+    ${chequesProvHtml(m,chm,chAb)}
+    <div class="sub" style="margin:4px 0">Total previsto por mes (fijos + cheques)</div>
     <div class="list">${prox.map(x=>`<button data-prm="${x}" class="row" style="width:100%;border:0;border-bottom:1px solid var(--line);border-radius:0;${x===m?'background:var(--accent-bg)':''}"><span style="font-weight:700">${mesNom(x+'-01')}</span><span class="num" style="font-weight:700">${money(totalMesPrevisto(x))}</span></button>`).join('')}</div>
-    <div class="sub" style="margin-top:8px">Solo para prever: no se agenda ni genera pagos. Los pagos reales se cargan como siempre. Gastado real = egresos cargados ese mes que cuentan como gasto.</div>`;
+    <div class="sub" style="margin-top:8px">Los gastos fijos son solo para prever: no se agendan ni generan pagos. Los pagos agendados no se suman acá, así no se duplican sueldos ni alquileres. Los pagos reales se cargan como siempre. Gastado real = egresos cargados ese mes que cuentan como gasto.</div>`;
 }
 function bindProno(){
   const m=S.pronoMes||hoy().slice(0,7);
@@ -1080,14 +1084,42 @@ function bindProno(){
   document.querySelectorAll('[data-pr]').forEach(r=>r.onclick=()=>abrirFijo(r.dataset.pr));
   document.querySelectorAll('[data-prt]').forEach(b=>b.onclick=()=>{const k=b.dataset.prt;if(k==='ch')S.prChAb=!S.prChAb;else if(k==='pa')S.prPaAb=!S.prPaAb;else S.prAgAb=!S.prAgAb;render()});
   document.querySelectorAll('[data-prc]').forEach(b=>b.onclick=()=>{S.prCatAb[b.dataset.prc]=!S.prCatAb[b.dataset.prc];render()});
+  document.querySelectorAll('[data-prg]').forEach(b=>b.onclick=()=>{S.prChGr=S.prChGr||{};S.prChGr[b.dataset.prg]=!S.prChGr[b.dataset.prg];render()});
   document.querySelectorAll('[data-pru]').forEach(b=>b.onclick=()=>{S.prUniAb[b.dataset.pru]=!S.prUniAb[b.dataset.pru];render()});
   const fa=$('#fabr');if(fa){const todo=v=>{Object.values(S.prono||{}).forEach(p=>{if(!p)return;const c=p.categoria||'_';S.prCatAb[c]=v;S.prUniAb[c+'|'+unidadDe(p)]=v});render()};fa.onclick=()=>todo(true);$('#fcer').onclick=()=>todo(false)}
 }
 // Detalle de un gasto fijo: actualizar monto desde un mes (aumento) + historial.
-function abrirFijo(id){const p=S.prono[id];if(!p)return;const t=hoy().slice(0,7),mon=p.moneda||'ARS';
+// Cheques del mes agrupados por proveedor/cuenta (o nota si no tiene cuenta). Se marca en amarillo el
+// grupo cuya categoría también se usa en gastos fijos, para detectar alquileres u otros contados dos veces.
+function chequesProvHtml(m,chm,chAb){
+  if(!chm.length)return '';S.prChGr=S.prChGr||{};
+  const catsFijas=new Set(Object.values(S.prono||{}).filter(p=>p&&p.activo!==false&&p.desde<=m&&(!p.hasta||p.hasta>=m)).map(p=>p.categoria));
+  const g={};chm.forEach(o=>{const e=o.e,k=e.cuenta?'c:'+e.cuenta:'n:'+(e.nota||'Sin cuenta').trim().toLowerCase();(g[k]=g[k]||{nom:ctaNom(e.cuenta)||e.nota||'Sin cuenta',cats:new Set(),l:[]});g[k].cats.add(e.categoria);g[k].l.push(o)});
+  const filas=Object.entries(g).sort((a,b)=>sumar(b[1].l)-sumar(a[1].l)).map(([k,x])=>{const ab=!!S.prChGr[m+k],dup=[...x.cats].some(c=>catsFijas.has(c)),cat=[...x.cats].map(catNom).filter(Boolean).join(', ');
+    return `<button data-prg="${esc(m+k)}" class="row" style="width:100%;border:0;border-bottom:1px solid var(--line);border-radius:0;padding-left:30px;align-items:center;background:${dup?'#fffbeb':'#fff'}"><span style="min-width:0;text-align:left"><span style="display:block;font-weight:600;${dup?'color:#92400e':''}">${ab?'▾':'▸'} ${esc(x.nom)}</span><span class="sub" style="display:block;margin:0;${dup?'color:#92400e':''}">${esc(cat||'Sin categoría')} · ${x.l.length} cheque${x.l.length>1?'s':''}${dup?' · también está en gastos fijos':''}</span></span><span class="num" style="font-weight:700;${dup?'color:#92400e':''}">${money(sumar(x.l))}</span></button>${ab?x.l.map(itemAgenda).join(''):''}`}).join('');
+  return `<div class="list" style="margin-bottom:10px"><button data-prt="ch" class="row" style="width:100%;border:0;border-bottom:1px solid var(--line);border-radius:0;background:#fafbfc;align-items:center"><span style="display:flex;gap:8px;align-items:center"><span style="width:14px;color:var(--muted)">${chAb?'▾':'▸'}</span><span style="font-weight:700">Cheques que vencen en ${mesNom(m+'-01').toLowerCase()}</span><span class="sub" style="margin:0">${chm.length}</span></span><span class="num" style="font-weight:700">${money(sumar(chm))}</span></button>${chAb?filas:''}</div>`;
+}
+// Confirmación mensual: los gastos fijos marcados "confirmar cada mes" (por defecto los de categoría alquiler)
+// piden, al arrancar cada mes, confirmar que el monto sigue igual. Se guarda en confirmados/{YYYY-MM}.
+const esAlquilerCat=c=>/alquiler/i.test(catNom(c)||'');
+const pideConfirmar=p=>p.confirmarMes!=null?!!p.confirmarMes:esAlquilerCat(p.categoria);
+function fijosAConfirmar(){const t=hoy().slice(0,7);return Object.entries(S.prono||{}).filter(([,p])=>p&&p.activo!==false&&pideConfirmar(p)&&p.desde<=t&&(!p.hasta||p.hasta>=t)&&!(p.confirmados||{})[t]&&!(p.aumentos||{})[t]&&p.desde!==t)}
+function confirmarFijosHtml(enVista){
+  if(!isAdmin())return '';const l=fijosAConfirmar();if(!l.length)return '';const t=hoy().slice(0,7);
+  if(!enVista)return `<button id="irconf" class="card" style="width:100%;text-align:left;border-color:#f59e0b;background:#fffbeb;margin-bottom:12px"><b>Confirmá ${l.length} gasto${l.length>1?'s':''} fijo${l.length>1?'s':''} de ${mesNom(t+'-01').toLowerCase()}</b><span class="sub" style="display:block;margin:2px 0 0">Revisá que el monto siga igual · tocá para ir</span></button>`;
+  return `<div class="card" style="border-color:#f59e0b;background:#fffbeb;margin-bottom:12px"><div style="font-weight:700;margin-bottom:4px">¿Siguen igual en ${mesNom(t+'-01').toLowerCase()}?</div>
+    ${l.map(([id,p])=>`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--line)"><div style="min-width:0"><div>${esc(p.concepto)}</div><div class="sub num" style="margin:0">${money(montoVigente(p,t),p.moneda||'ARS')}</div></div><div style="display:flex;gap:6px;flex:none"><button data-cfok="${id}" style="padding:6px 10px;font-size:13px">Sigue igual</button><button data-cfch="${id}" style="padding:6px 10px;font-size:13px">Cambió</button></div></div>`).join('')}</div>`;
+}
+function bindConfirmar(){
+  const t=hoy().slice(0,7);
+  const ir=$('#irconf');if(ir)ir.onclick=()=>{S.view='agenda';S.agModo='prono';window.scrollTo(0,0);render()};
+  document.querySelectorAll('[data-cfok]').forEach(b=>b.onclick=async()=>{const id=b.dataset.cfok,p=S.prono[id];await db.ref(ROOT+'/pronostico/'+id+'/confirmados/'+t).set(S.user);logAcc('editar','pronostico',id,`${p.concepto} · confirmó ${money(montoVigente(p,t),p.moneda||'ARS')} para ${mesNom(t+'-01')}`);toast('Confirmado')});
+  document.querySelectorAll('[data-cfch]').forEach(b=>b.onclick=()=>abrirFijo(b.dataset.cfch,t));
+}
+function abrirFijo(id,desdeMes){const p=S.prono[id];if(!p)return;const t=hoy().slice(0,7),mon=p.moneda||'ARS';
   abrirModal(`<h2>${esc(p.concepto)}</h2><p class="sub">${esc(catNom(p.categoria)||'')} · ${unidadDe(p)} · hoy ${money(montoVigente(p,p.desde>t?p.desde:t),mon)}</p>
   <label for="anm">Nuevo monto</label><input id="anm" class="num" inputmode="decimal" placeholder="3.200.000" style="font-size:20px;font-weight:700">
-  <label for="and">Desde el mes</label><input id="and" type="month" value="${mesAdd(t,1)}">
+  <label for="and">Desde el mes</label><input id="and" type="month" value="${desdeMes||mesAdd(t,1)}">
   <p class="sub">Los meses anteriores quedan con el monto que tenían.</p><div id="aerr" class="err"></div>
   <div class="actions"><button id="aedit">Editar datos</button><button id="acan">Cerrar</button><button class="pri" id="aok">Guardar aumento</button></div>
   <div style="border-top:1px solid var(--line);margin-top:12px;padding-top:8px"><div class="sub" style="margin:0 0 4px">Historial</div>
@@ -1109,6 +1141,8 @@ function abrirProno(id,mes){
   <label for="gm">${id?'Monto inicial (para aumentos usá "Guardar aumento")':'Monto por mes'}</label><input id="gm" class="num" inputmode="decimal" value="${p.monto?Number(p.monto).toLocaleString('es-AR'):''}" placeholder="250.000" style="font-size:20px;font-weight:700">
   <div class="chips" id="gmo" style="margin-top:8px"><button class="chip ${(p.moneda||'ARS')==='ARS'?'on':''}" data-v="ARS">Pesos</button><button class="chip ${p.moneda==='USD'?'on':''}" data-v="USD">Dólares</button></div>
   <label>Categoría</label><div class="chips" id="gca">${cats.map(([k,c])=>`<button class="chip ${p.categoria===k?'on':''}" data-id="${k}">${esc(c.nombre)}</button>`).join('')}</div>
+  <label style="display:flex;gap:8px;align-items:center;color:var(--ink);font-size:14px;margin-top:10px"><input type="checkbox" id="gcf" ${pideConfirmar(p)?'checked':''} style="width:auto"> Pedir confirmar el monto cada mes</label>
+  <p class="sub" style="margin:2px 0 0">Viene tildado para alquileres. Al arrancar el mes te pregunta si sigue igual.</p>
   <label>Unidad de negocio</label><div class="chips" id="gun">${UNIDADES.map(u=>`<button class="chip ${unidadDe(p)===u?'on':''}" data-u="${u}">${u}</button>`).join('')}</div>
   <div class="grid2"><div><label for="gd">Desde</label><input id="gd" type="month" value="${p.desde}"></div><div><label for="gh">Hasta (vacío = sin fin)</label><input id="gh" type="month" value="${p.hasta||''}"></div></div>
   <div id="gerr" class="err"></div>
@@ -1116,7 +1150,8 @@ function abrirProno(id,mes){
   let cat=p.categoria,mon=p.moneda||'ARS',uni=unidadDe(p);
   document.querySelectorAll('#gun .chip').forEach(b=>b.onclick=()=>{uni=b.dataset.u;document.querySelectorAll('#gun .chip').forEach(x=>x.classList.toggle('on',x===b))});
   document.querySelectorAll('#gmo .chip').forEach(b=>b.onclick=()=>{mon=b.dataset.v;document.querySelectorAll('#gmo .chip').forEach(x=>x.classList.toggle('on',x===b))});
-  document.querySelectorAll('#gca .chip').forEach(b=>b.onclick=()=>{cat=b.dataset.id;document.querySelectorAll('#gca .chip').forEach(x=>x.classList.toggle('on',x===b))});
+  let cfTocado=id&&S.prono[id]&&S.prono[id].confirmarMes!=null;$('#gcf').onchange=()=>{cfTocado=true};
+  document.querySelectorAll('#gca .chip').forEach(b=>b.onclick=()=>{cat=b.dataset.id;if(!cfTocado)$('#gcf').checked=esAlquilerCat(cat);document.querySelectorAll('#gca .chip').forEach(x=>x.classList.toggle('on',x===b))});
   ['#gm','#gov'].forEach(q=>{const el=$(q);if(el)el.onblur=e=>{const v=parseMonto(e.target.value);if(v)e.target.value=v.toLocaleString('es-AR')}});
   $('#gcan').onclick=cerrarModal;
   const gd=$('#gdel');if(gd)gd.onclick=async()=>{if(!confirm('¿Borrar este gasto fijo de todos los meses?'))return;await db.ref(ROOT+'/pronostico/'+id).update({activo:false});logAcc('borrar','pronostico',id,p.concepto);cerrarModal();toast('Gasto borrado')};
@@ -1127,7 +1162,7 @@ function abrirProno(id,mes){
     if(!cat){$('#gerr').textContent='Elegí una categoría.';return}
     if(!desde){$('#gerr').textContent='Poné desde qué mes.';return}
     if(hasta&&hasta<desde){$('#gerr').textContent='"Hasta" no puede ser antes que "Desde".';return}
-    const rec={concepto,monto,moneda:mon,categoria:cat,unidad:uni,desde,hasta,activo:true};
+    const rec={concepto,monto,moneda:mon,categoria:cat,unidad:uni,desde,hasta,activo:true,confirmarMes:$('#gcf').checked};
     const rs=`${concepto} · ${money(monto,mon)} por mes desde ${mesNom(desde+'-01')}${hasta?' hasta '+mesNom(hasta+'-01'):''}`;
     if(id){rec.editadoPor=S.user;await db.ref(ROOT+'/pronostico/'+id).update(rec);logAcc('editar','pronostico',id,rs)}
     else{rec.creadoPor=S.user;rec.ts=Date.now();const nid=uid();await db.ref(ROOT+'/pronostico/'+nid).set(rec);logAcc('crear','pronostico',nid,rs)}
@@ -1190,7 +1225,7 @@ function vAgenda(){
   document.querySelectorAll('[data-cha]').forEach(b=>b.onclick=()=>{S.chAgrupa=b.dataset.cha;render()});
   document.querySelectorAll('[data-chm]').forEach(b=>b.onclick=()=>{S.chMesAb=S.chMesAb||{};S.chMesAb[b.dataset.chm]=!S.chMesAb[b.dataset.chm];render()});
   document.querySelectorAll('[data-pmm]').forEach(b=>b.onclick=()=>{S.pmAb=S.pmAb||{};S.pmAb[b.dataset.pmm]=!S.pmAb[b.dataset.pmm];render()});
-  if(modo==='prono')bindProno();
+  if(modo==='prono'){bindProno();bindConfirmar()}
   S.diasAb=S.diasAb||{};
   document.querySelectorAll('[data-dtog]').forEach(b=>b.onclick=()=>{const f=b.dataset.dtog;S.diasAb[f]=!diaAbierto(f);render()});
   const da=$('#dabr');if(da){da.onclick=()=>{document.querySelectorAll('[data-dtog]').forEach(b=>S.diasAb[b.dataset.dtog]=true);render()};$('#dcer').onclick=()=>{document.querySelectorAll('[data-dtog]').forEach(b=>S.diasAb[b.dataset.dtog]=false);render()}}
