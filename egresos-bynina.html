@@ -957,6 +957,16 @@ function porDiaHtml(l){
       <span style="display:flex;gap:8px;align-items:center"><span style="width:14px;color:var(--muted)">${ab?'▾':'▸'}</span><span style="font-weight:700">${d.charAt(0).toUpperCase()+d.slice(1)} ${fmtFc(f)}</span><span class="sub" style="margin:0">${n} pago${n>1?'s':''}</span></span>
       <span class="num" style="font-weight:700">${money(sumar(x))}</span></button>${ab?x.map(itemAgenda).join(''):''}`}).join('')}</div>`;
 }
+// Recuadro "Vencido al día de hoy por forma de pago": suma lo pendiente con vencimiento hasta hoy inclusive,
+// agrupado por el medio de pago del cheque o el medio previsto del pago agendado. Montos en pesos.
+function vencPorMedioHtml(pend,t){
+  const l=pend.filter(o=>o.fecha<=t);if(!l.length)return '';
+  const g={};l.forEach(o=>{const m=(o.tipo==='cheque'?o.e.medio:o.p.medio)||'_';const x=g[m]=g[m]||{tot:0,hoy:0,n:0};const v=ars(o);x.tot+=v;x.n++;if(o.fecha===t)x.hoy+=v});
+  const ord=id=>id==='_'?999:((S.cfg.medios?.[id]?.orden)??99);
+  const filas=Object.keys(g).sort((a,b)=>g[b].tot-g[a].tot||ord(a)-ord(b)).map(m=>{const x=g[m];
+    return `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--line)"><div style="min-width:0"><div style="font-weight:700">${esc(m==='_'?'Sin medio asignado':medNom(m)||'Sin medio asignado')}</div><div class="sub" style="margin:0">${x.n} pago${x.n>1?'s':''}${x.hoy?' · '+money(x.hoy)+' vence hoy':''}</div></div><div class="num" style="font-weight:700;color:var(--danger)">${money(x.tot)}</div></div>`}).join('');
+  return `<div class="card" style="margin-bottom:12px"><div class="hdr" style="margin:0 0 6px"><span style="font-weight:700">Vencido al ${fmtFc(t)} por forma de pago</span><span class="num" style="font-weight:700;color:var(--danger)">${money(sumar(l))}</span></div>${filas}<div class="sub" style="margin:6px 0 0">Incluye lo que vence hoy. Cheques y echeq sin marcar como debitados cuentan como pendientes.</div></div>`;
+}
 function vAgenda(){
   const t=hoy(),sem=rango('semana',0);
   const modo=S.agModo||'lista';
@@ -964,7 +974,7 @@ function vAgenda(){
   const pend=agendaItems(addDias(t,40)).filter(o=>!o.pagado);
   const venc=pend.filter(o=>o.fecha<t),estaSem=pend.filter(o=>o.fecha>=t&&o.fecha<=sem.hasta);
   const cards=`<div class="grid2" style="margin-bottom:12px"><div class="met"><div class="l">Vencido sin pagar</div><div class="v num" style="${venc.length?'color:var(--danger)':''}">${money(sumar(venc))}</div></div>
-    <div class="met"><div class="l">Falta pagar o debitar esta semana</div><div class="v num">${money(sumar(estaSem))}</div></div></div>`;
+    <div class="met"><div class="l">Falta pagar o debitar esta semana</div><div class="v num">${money(sumar(estaSem))}</div></div></div>`+vencPorMedioHtml(pend,t);
   let body='';
   if(modo==='lista'){
     const grupos=[];if(venc.length)grupos.push(['Vencidos',venc,true]);
