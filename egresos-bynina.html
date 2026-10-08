@@ -967,10 +967,26 @@ function vencPorMedioHtml(pend,t){
     return `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--line)"><div style="min-width:0"><div style="font-weight:700">${esc(m==='_'?'Sin medio asignado':medNom(m)||'Sin medio asignado')}</div><div class="sub" style="margin:0">${x.n} pago${x.n>1?'s':''}${x.hoy?' · '+money(x.hoy)+' vence hoy':''}</div></div><div class="num" style="font-weight:700;color:var(--danger)">${money(x.tot)}</div></div>`}).join('');
   return `<div class="card" style="margin-bottom:12px"><div class="hdr" style="margin:0 0 6px"><span style="font-weight:700">Vencido al ${fmtFc(t)} por forma de pago</span><span class="num" style="font-weight:700;color:var(--danger)">${money(sumar(l))}</span></div>${filas}<div class="sub" style="margin:6px 0 0">Incluye lo que vence hoy. Cheques y echeq sin marcar como debitados cuentan como pendientes.</div></div>`;
 }
+// Obligaciones por mes: pagos agendados + cheques, por mes de vencimiento. Desde el mes más viejo
+// que tenga algo sin pagar hasta 11 meses adelante. Por cada mes: total, pagado, falta y desglose por medio.
+function porMesHtml(){
+  const t=hoy(),m0=t.slice(0,7)+'-01',fin=iso(new Date(fromIso(m0).getFullYear(),fromIso(m0).getMonth()+12,0));
+  const items=agendaItems(fin);
+  const meses={};items.forEach(o=>{const m=o.fecha.slice(0,7);if(m<t.slice(0,7)&&o.pagado)return;(meses[m]=meses[m]||[]).push(o)});
+  const keys=Object.keys(meses).sort();if(!keys.length)return '<div class="empty">No hay pagos agendados ni cheques.</div>';
+  const medioDe=o=>(o.tipo==='cheque'?o.e.medio:o.p.medio)||'_';
+  const ord=id=>id==='_'?999:((S.cfg.medios?.[id]?.orden)??99);
+  return keys.map(m=>{const l=meses[m],pg=l.filter(o=>o.pagado),pe=l.filter(o=>!o.pagado),pasado=m<t.slice(0,7);
+    const g={};l.forEach(o=>{const k=medioDe(o),x=g[k]=g[k]||{tot:0,falta:0};const v=ars(o);x.tot+=v;if(!o.pagado)x.falta+=v});
+    const filas=Object.keys(g).sort((a,b)=>ord(a)-ord(b)).map(k=>`<div style="display:flex;justify-content:space-between;gap:8px;padding:4px 0;border-top:1px solid var(--line)"><span>${esc(k==='_'?'Sin medio asignado':medNom(k)||'Sin medio asignado')}</span><span class="num">${g[k].falta?`<b>${money(g[k].falta)}</b>`:'<span style="color:var(--ok)">✓</span>'}${g[k].falta!==g[k].tot&&!pasado?` <span class="sub" style="margin:0">de ${money(g[k].tot)}</span>`:''}</span></div>`).join('');
+    return `<div class="card" style="margin-bottom:10px"><div class="hdr" style="margin:0 0 2px"><span style="font-weight:700">${mesNom(m+'-01')}${pasado?' · <span style="color:var(--danger)">vencido</span>':''}</span><span class="num" style="font-weight:700;${pasado?'color:var(--danger)':''}">${money(sumar(pe))}</span></div>
+      <div class="sub" style="margin:0 0 6px">${pasado?pe.length+' pago'+(pe.length!==1?'s':'')+' sin pagar':`Total del mes ${money(sumar(l))} · pagado ${money(sumar(pg))} · falta ${money(sumar(pe))}`}</div>${filas}</div>`}).join('')
+    +'<div class="sub">Incluye pagos agendados y cheques por fecha de vencimiento. Los cheques cuentan como pagados cuando se marcan debitados. Montos en pesos.</div>';
+}
 function vAgenda(){
   const t=hoy(),sem=rango('semana',0);
   const modo=S.agModo||'lista';
-  const tabs=`<div class="chips" style="margin-bottom:10px"><button class="chip ${modo==='lista'?'on':''}" data-am="lista">Agenda</button><button class="chip ${modo==='mes'?'on':''}" data-am="mes">Mes</button><button class="chip ${modo==='cheques'?'on':''}" data-am="cheques">Cheques</button><button class="chip ${modo==='caja'?'on':''}" data-am="caja">Caja</button><button class="pri" id="nprog" style="margin-left:auto;padding:7px 12px;font-size:13px">Agendar pago</button></div>`;
+  const tabs=`<div class="chips" style="margin-bottom:10px"><button class="chip ${modo==='lista'?'on':''}" data-am="lista">Agenda</button><button class="chip ${modo==='mes'?'on':''}" data-am="mes">Mes</button><button class="chip ${modo==='pormes'?'on':''}" data-am="pormes">Por mes</button><button class="chip ${modo==='cheques'?'on':''}" data-am="cheques">Cheques</button><button class="chip ${modo==='caja'?'on':''}" data-am="caja">Caja</button><button class="pri" id="nprog" style="margin-left:auto;padding:7px 12px;font-size:13px">Agendar pago</button></div>`;
   const pend=agendaItems(addDias(t,40)).filter(o=>!o.pagado);
   const venc=pend.filter(o=>o.fecha<t),estaSem=pend.filter(o=>o.fecha>=t&&o.fecha<=sem.hasta);
   const cards=`<div class="grid2" style="margin-bottom:12px"><div class="met"><div class="l">Vencido sin pagar</div><div class="v num" style="${venc.length?'color:var(--danger)':''}">${money(sumar(venc))}</div></div>
@@ -984,15 +1000,18 @@ function vAgenda(){
       ${l.length?porDiaHtml(l):'<div class="sub" style="padding:4px 2px">Nada agendado.</div>'}`).join('');
     body=`<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:4px"><button id="dabr" style="padding:6px 10px;font-size:13px">Abrir todo</button><button id="dcer" style="padding:6px 10px;font-size:13px">Cerrar todo</button></div>`+body;
     if(!Object.keys(S.programados).length&&!chequesAgenda('2999-12-31').some(o=>!o.pagado))body=`<div class="empty">Todavía no hay pagos agendados. Cargá alquiler, sueldos, echeqs o cuotas con "Agendar pago".</div>`;
+  }else if(modo==='pormes'){body=porMesHtml();
   }else if(modo==='caja'){body=cajaHtml();
   }else if(modo==='cheques'){
     const f=S.chFiltro||'pend';
     let l=chequesAgenda('2999-12-31');if(f==='pend')l=l.filter(o=>!o.pagado);if(f==='deb')l=l.filter(o=>o.pagado);
-    l.sort((a,b)=>f==='deb'?b.fecha.localeCompare(a.fecha):a.fecha.localeCompare(b.fecha));
-    const porMes={};l.forEach(o=>{const m=o.fecha.slice(0,7);(porMes[m]=porMes[m]||[]).push(o)});
+    const ag=S.chAgrupa||'venc',fKey=o=>ag==='firma'?(o.e.fecha||o.fecha):o.fecha;
+    l.sort((a,b)=>f==='deb'?fKey(b).localeCompare(fKey(a)):fKey(a).localeCompare(fKey(b)));
+    const porMes={};l.forEach(o=>{const m=fKey(o).slice(0,7);(porMes[m]=porMes[m]||[]).push(o)});
     body=`<div class="grid2" style="margin-bottom:8px"><button id="chant">Marcar cheques anteriores</button><button id="chfdeb">Cambiar fecha de débito</button></div><div class="chips" style="margin-bottom:6px">${[['pend','A debitar'],['deb','Debitados'],['todos','Todos']].map(([k,x])=>`<button class="chip ${f===k?'on':''}" data-chf="${k}">${x}</button>`).join('')}</div>
+      <div class="chips" style="margin-bottom:6px"><span class="sub" style="margin:0;align-self:center">Agrupar por mes de:</span>${[['venc','Vencimiento'],['firma','Firma']].map(([k,x])=>`<button class="chip ${ag===k?'on':''}" data-cha="${k}">${x}</button>`).join('')}</div>
       <div class="hdr" style="margin:6px 0"><span class="sub">${l.length} cheques</span><span class="num" style="font-weight:700">${money(sumar(l))}</span></div>
-      ${l.length?Object.entries(porMes).map(([m,x])=>`<div class="hdr" style="margin:14px 0 6px"><span style="font-weight:700">${mesNom(m+'-01')}</span><span class="num" style="font-weight:700">${money(sumar(x))}</span></div><div class="list">${x.map(itemCheque).join('')}</div>`).join('')
+      ${l.length?Object.entries(porMes).map(([m,x])=>`<div class="hdr" style="margin:14px 0 6px"><span style="font-weight:700">${mesNom(m+'-01')}${ag==='firma'?' · firmado':''}</span><span class="num" style="font-weight:700">${money(sumar(x))}</span></div><div class="list">${x.map(itemCheque).join('')}</div>`).join('')
       :'<div class="empty">No hay cheques en esta lista. Se cargan desde "Cargar", eligiendo Cheque o Echeq como medio de pago.</div>'}`;
   }else{
     const base=new Date();const m0=new Date(base.getFullYear(),base.getMonth()+S.calOffset,1),m1=new Date(m0.getFullYear(),m0.getMonth()+1,0);
@@ -1015,6 +1034,7 @@ function vAgenda(){
   $('#vista').innerHTML=tabs+cards+body;
   document.querySelectorAll('[data-am]').forEach(b=>b.onclick=()=>{S.agModo=b.dataset.am;render()});
   document.querySelectorAll('[data-chf]').forEach(b=>b.onclick=()=>{S.chFiltro=b.dataset.chf;render()});
+  document.querySelectorAll('[data-cha]').forEach(b=>b.onclick=()=>{S.chAgrupa=b.dataset.cha;render()});
   S.diasAb=S.diasAb||{};
   document.querySelectorAll('[data-dtog]').forEach(b=>b.onclick=()=>{const f=b.dataset.dtog;S.diasAb[f]=!diaAbierto(f);render()});
   const da=$('#dabr');if(da){da.onclick=()=>{document.querySelectorAll('[data-dtog]').forEach(b=>S.diasAb[b.dataset.dtog]=true);render()};$('#dcer').onclick=()=>{document.querySelectorAll('[data-dtog]').forEach(b=>S.diasAb[b.dataset.dtog]=false);render()}}
