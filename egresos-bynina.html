@@ -171,7 +171,7 @@ function iniciarDatos(){
     if(!v.fuentes){const up={};['Nina Cya - Credicoop','Efectivo local','Mercado Pago'].forEach((n,i)=>up['fuentes/'+uid()]={nombre:n,orden:i,saldo:0});await db.ref(ROOT+'/caja').update(up);return}
     S.caja=v;if(S.view==='agenda'&&S.agModo==='caja')render()});
   // Cortes controlados en Logística (app de fábrica, misma base) para facturar a los talleres desde acá.
-  db.ref('fabrica_v5/logistica/items').on('value',s=>{S.logi=s.val()||{};S.logiOk=true;if(S.view==='fact'||S.view==='cuentas')render()});
+  db.ref('fabrica_v5/logistica/items').on('value',s=>{S.logi=s.val()||{};S.logiOk=true;if(S.view==='fact'||S.view==='cuentas'||S.view==='traer')render()});
   db.ref(ROOT+'/log').limitToLast(1000).on('value',s=>{S.log=s.val()||{};if(S.view==='hist')render()});
 }
 
@@ -203,12 +203,12 @@ function render(){
   if(!isAdmin()&&S.view==='rep')S.view='cargar';
   $('#app').innerHTML=`<header><h1>Egresos By Nina</h1><span class="u">${USERS[S.user].nombre} · <a href="#" id="salir" style="color:inherit">Salir</a></span></header>
   <div class="wrap">${bannerBackup()}${borradosHtml()}${S.view==='agenda'&&S.agModo==='prono'?'':confirmarFijosHtml(false)}<div id="vista"></div></div>
-  <nav>${tabs.map(([k,t])=>`<button data-v="${k}" class="${S.view===k||(k==='cuentas'&&S.view==='fact')?'on':''}">${t}</button>`).join('')}</nav>`;
+  <nav>${tabs.map(([k,t])=>`<button data-v="${k}" class="${S.view===k||(k==='cuentas'&&(S.view==='fact'||S.view==='traer'))?'on':''}">${t}</button>`).join('')}</nav>`;
   $('#salir').onclick=e=>{e.preventDefault();localStorage.removeItem('egr_user');S.user=null;render()};
   document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{S.view=b.dataset.v;if(b.dataset.v!=='cuentas')S.cuentaAbierta=null;window.scrollTo(0,0);render()});
   const bb=$('#bkbtn');if(bb)bb.onclick=descargarBackup;
   bindBorrados();bindConfirmar();
-  ({hist:vHist,fact:vFact,cargar:vCargar,agenda:vAgenda,mov:vMov,cuentas:vCuentas,rep:vRep,ajustes:vAjustes})[S.view]();
+  ({hist:vHist,fact:vFact,traer:vTraer,cargar:vCargar,agenda:vAgenda,mov:vMov,cuentas:vCuentas,rep:vRep,ajustes:vAjustes})[S.view]();
 }
 
 function diasDesdeBackup(){const b=S.cfg?.ultimoBackup?.fecha;if(!b)return Infinity;return Math.floor((Date.now()-new Date(b).getTime())/86400000)}
@@ -400,6 +400,7 @@ const RUTA_BORR={egreso:'egresos',cargo:'cargos',programado:'programados'};
 async function ejecBorrarEgreso(id){const antes=S.egresos[id];if(!antes)return null;await db.ref(ROOT+'/egresos/'+id).remove();logAcc('borrar','egreso',id,resEg(antes),{antes});
   if(antes.venc)await db.ref(ROOT+'/ocurrencias/'+antes.venc.prog+'/'+antes.venc.k).update({pagado:null,egresoId:null,pagadoFecha:null});return antes.venc||null}
 async function ejecBorrarCargo(id){const antes=S.cargos[id];if(!antes)return;
+  if(antes.logiId&&antes.traspaso==='fabrica'){const up={[ROOT+'/cargos/'+id]:null,[`fabrica_v5/logistica/items/${antes.logiId}/egresos_cargo_id`]:null,[`fabrica_v5/logistica/items/${antes.logiId}/egresos_traspasado`]:null};await db.ref().update(up);logAcc('borrar','corte traspasado',antes.logiId,`${ctaNom(antes.cuenta)} · ${antes.desc} · ${money(antes.monto)}`,{antes});return}
   if(antes.logiId){const up={[ROOT+'/cargos/'+id]:null};['facturado_cta_cte','facturacion_monto','facturacion_fecha','facturacion_fecha_registro','facturacion_registrado_por','facturacion_en','egresos_cargo_id'].forEach(k=>up[`fabrica_v5/logistica/items/${antes.logiId}/${k}`]=null);await db.ref().update(up);logAcc('desfacturar','corte',antes.logiId,`${ctaNom(antes.cuenta)} · ${antes.desc} · ${money(antes.monto)}`,{antes});return}
   await db.ref(ROOT+'/cargos/'+id).remove();logAcc('borrar',antes.lado==='haber'?'descuento':'debe',id,`${ctaNom(antes.cuenta)} · ${antes.desc} · ${money(antes.monto,monCta(antes.cuenta))}`,{antes})}
 async function ejecBorrarProg(id){const p=S.programados[id];if(!p)return;await db.ref(ROOT+'/programados/'+id).update({activo:false,borradoPend:null});logAcc('borrar','programado',id,p.concepto)}
@@ -564,6 +565,7 @@ function vCuentas(){
   $('#vista').innerHTML=`${fp.length?`<button id="irfact" class="card" style="width:100%;text-align:left;display:flex;justify-content:space-between;align-items:center;gap:10px;border-color:#f59e0b;background:#fffbeb">
     <span><b>🧾 ${fp.length} corte${fp.length!==1?'s':''} finalizado${fp.length!==1?'s':''} para facturar</b><span class="sub" style="display:block;margin:2px 0 0">${fsp?fsp+' sin precio · ':''}tocá para revisar y facturar</span></span>
     <span class="num" style="font-weight:700">${money(fp.reduce((a,[,it])=>a+factMonto(it),0))}</span></button>`:''}
+  ${S.cuentaTipo==='Talleres'&&S.logiOk&&(traerA().length||traerB().length)?`<div style="margin:-4px 0 10px"><a href="#" id="irtraer" style="font-size:13px;color:var(--muted)">⤓ Traer cortes anteriores (${traerA().length+traerB().length})</a></div>`:''}
   <div class="chips" style="margin-bottom:10px">${TIPOS.map(t=>`<button class="chip ${S.cuentaTipo===t?'on':''}" data-t="${t}">${t}</button>`).join('')}</div>
   <div class="hdr" style="margin-bottom:8px"><span class="sub">Saldo total ${S.cuentaTipo.toLowerCase()}</span><span class="num" style="font-weight:700">${money(totA)}${totU?' + '+money(totU,'USD'):''}</span></div>
   ${l.length?`<div class="list">${l.map(([id,c])=>{const s=saldoCuenta(id);return `<div class="row" data-c="${id}"><div><div style="font-weight:700">${esc(c.nombre)}</div><div class="sub">Debe ${money(s.debe,monCta(id))} · Haber ${money(s.haber,monCta(id))}</div></div><div class="num" style="font-weight:700;${s.saldo<0?'color:var(--ok)':''}">${money(s.saldo,monCta(id))}</div></div>`}).join('')}</div>`
@@ -571,6 +573,7 @@ function vCuentas(){
   document.querySelectorAll('[data-t]').forEach(x=>x.onclick=()=>{S.cuentaTipo=x.dataset.t;render()});
   document.querySelectorAll('[data-c]').forEach(x=>x.onclick=()=>{S.cuentaAbierta=x.dataset.c;window.scrollTo(0,0);render()});
   const irf=$('#irfact');if(irf)irf.onclick=()=>{S.view='fact';window.scrollTo(0,0);render()};
+  const irt=$('#irtraer');if(irt)irt.onclick=e=>{e.preventDefault();S.view='traer';window.scrollTo(0,0);render()};
 }
 function vLedger(cid){
   const c=S.cuentas[cid],m=movimientosCuenta(cid),s=saldoCuenta(cid),mc=monCta(cid);
@@ -613,6 +616,13 @@ function factCierreIso(it){return it.fecha_cerrado?iso(new Date(it.fecha_cerrado
 function factCant(it){if(it.facturacion_cantidad_manual!=null)return Number(it.facturacion_cantidad_manual)||0;return Object.values(it.grilla||{}).reduce((s,f)=>s+(f.ok||0)+(f.detalle||0)+(f.fallado_tela||0),0)}
 function factMonto(it){return factCant(it)*(Number(it.precio_taller)||0)}
 function factDest(it){return (it.taller||it.proveedor||'').trim()||'Sin taller'}
+// Un corte se puede mandar a otra cuenta (ej. taller duplicado "Ciprian" / "Ciprian (NINA)"): se guarda en
+// logistica/items/{id}/egresos_cuenta y solo cambia a qué cuenta de egresos se factura; en fábrica queda igual.
+function factGrupo(it){const c=it.egresos_cuenta&&S.cuentas[it.egresos_cuenta];if(!c)return factDest(it);
+  // Si la cuenta destino ya está vinculada a un taller, se junta con los cortes de ese taller.
+  const tf=c.tallerFab&&c.tallerFab!=='—'?c.tallerFab:c.nombre;return ctaDeTaller(tf)===it.egresos_cuenta?tf:'cta:'+it.egresos_cuenta}
+function factGrupoNom(k){return k.startsWith('cta:')?ctaNom(k.slice(4)):k}
+function factCtaDe(it){return it.egresos_cuenta&&S.cuentas[it.egresos_cuenta]?it.egresos_cuenta:ctaDeTaller(factDest(it))}
 function factPendientes(){const a=factArranque();
   return Object.entries(S.logi||{}).filter(([,it])=>it&&it.estado==='cerrado'&&!it.no_facturar&&!it.facturado_cta_cte&&factCierreIso(it)>=a)}
 function ctaDeTaller(nombre){const n=nombre.toLowerCase();
@@ -621,15 +631,15 @@ function ctaDeTaller(nombre){const n=nombre.toLowerCase();
   return v?v[0]:null}
 function vFact(){
   const l=factPendientes().sort((a,b)=>factCierreIso(a[1]).localeCompare(factCierreIso(b[1])));
-  const grupos={};l.forEach(([id,it])=>{const k=factDest(it);(grupos[k]=grupos[k]||[]).push([id,it])});
+  const grupos={};l.forEach(([id,it])=>{const k=factGrupo(it);(grupos[k]=grupos[k]||[]).push([id,it])});
   const ctasCC=Object.entries(S.cuentas).filter(([,c])=>c.activo!==false&&c.llevaCC).sort((a,b)=>a[1].nombre.localeCompare(b[1].nombre));
-  const bloques=Object.keys(grupos).sort().map(t=>{
-    const cid=ctaDeTaller(t),its=grupos[t],tot=its.reduce((a,[,it])=>a+factMonto(it),0),conPrecio=its.filter(([,it])=>it.precio_taller>0).length;
-    const vinc=cid?`<span class="sub" style="margin:0">→ cuenta <b>${esc(ctaNom(cid))}</b>${monCta(cid)!=='ARS'?' <span style="color:var(--danger)">(en dólares: cambiá la vinculación)</span>':''} · <a href="#" data-desv="${esc(t)}" style="color:inherit">cambiar</a></span>`
+  const bloques=Object.keys(grupos).sort((a,b)=>factGrupoNom(a).localeCompare(factGrupoNom(b))).map(t=>{
+    const cid=t.startsWith('cta:')?t.slice(4):ctaDeTaller(t),its=grupos[t],tot=its.reduce((a,[,it])=>a+factMonto(it),0),conPrecio=its.filter(([,it])=>it.precio_taller>0).length;
+    const vinc=t.startsWith('cta:')?`<span class="sub" style="margin:0">→ cuenta <b>${esc(ctaNom(cid))}</b> · cortes movidos a mano a esta cuenta</span>`:cid?`<span class="sub" style="margin:0">→ cuenta <b>${esc(ctaNom(cid))}</b>${monCta(cid)!=='ARS'?' <span style="color:var(--danger)">(en dólares: cambiá la vinculación)</span>':''} · <a href="#" data-desv="${esc(t)}" style="color:inherit">cambiar</a></span>`
       :`<select data-vinc="${esc(t)}" style="max-width:260px"><option value="">Elegí la cuenta de este taller…</option>${ctasCC.map(([id,c])=>`<option value="${id}">${esc(c.nombre)} · ${esc(c.tipo)}</option>`).join('')}<option value="__nueva">+ Crear cuenta "${esc(t)}"</option></select>`;
     return `<div class="card" style="padding:0;overflow:hidden">
       <div style="padding:12px 14px;background:#fafbfc;border-bottom:1px solid var(--line)">
-        <div class="hdr"><b style="font-size:16px">🧵 ${esc(t)}</b><span class="num" style="font-weight:700">${money(tot)}</span></div>
+        <div class="hdr"><b style="font-size:16px">🧵 ${esc(factGrupoNom(t))}</b><span class="num" style="font-weight:700">${money(tot)}</span></div>
         <div style="margin-top:6px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">${vinc}
         ${cid&&conPrecio>1?`<button data-ftodos="${esc(t)}" class="pri" style="padding:6px 10px;font-size:13px">Facturar los ${conPrecio} con precio</button>`:''}</div>
       </div>
@@ -637,17 +647,32 @@ function vFact(){
         return `<div style="display:flex;gap:10px;align-items:center;padding:10px 14px;border-bottom:1px solid var(--line);flex-wrap:wrap">
         ${it.foto?`<img src="${esc(it.foto)}" alt="" loading="lazy" style="width:44px;height:44px;border-radius:8px;object-fit:cover;flex:none">`:''}
         <div style="flex:1;min-width:170px"><div style="font-weight:700">Corte ${esc(it.numero_corte||'s/n°')} · ${esc(it.code||'')}</div>
-          <div class="sub" style="margin:2px 0 0">${esc(it.name||'')} · entregó ${fmtFc(factFechaIso(it))}${it.proceso==='terminacion'?' · terminación':''}</div></div>
+          <div class="sub" style="margin:2px 0 0">${esc(it.name||'')} · entregó ${fmtFc(factFechaIso(it))}${it.proceso==='terminacion'?' · terminación':''}${it.egresos_cuenta?` · <b>movido a mano</b> (era ${esc(factDest(it))})`:''}</div>
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:4px">
+            <select data-fmov="${id}" style="width:auto;max-width:210px;padding:5px 8px;font-size:12px"><option value="">Mover a otra cuenta…</option>${it.egresos_cuenta?'<option value="__orig">↩ Volver a su taller</option>':''}${ctasCC.filter(([k])=>k!==cid).map(([k,c])=>`<option value="${k}">${esc(c.nombre)}</option>`).join('')}</select>
+            <a href="#" data-fnofact="${id}" style="font-size:12px;color:var(--muted)">No se factura</a></div></div>
         <label style="margin:0;font-size:12px;color:var(--muted)">Cant.${man?' (a mano)':''}<input data-fcant="${id}" class="num" inputmode="numeric" value="${cant}" style="width:70px;display:block"></label>
         <label style="margin:0;font-size:12px;color:${pre?'var(--muted)':'var(--danger)'}">${pre?'Precio':'Falta precio'}<input data-fpre="${id}" class="num" inputmode="decimal" value="${pre?pre.toLocaleString('es-AR'):''}" placeholder="$/u" style="width:80px;display:block;${pre?'':'border-color:var(--danger)'}"></label>
         <div style="text-align:right;min-width:90px"><div class="num" style="font-weight:700">${pre?money(cant*pre):'—'}</div>
         <button data-fact="${id}" class="pri" style="margin-top:4px;padding:6px 10px;font-size:13px" ${pre&&cid&&monCta(cid)==='ARS'?'':'disabled'}>Facturar</button></div>
       </div>`}).join('')}
     </div>`}).join('');
-  $('#vista').innerHTML=`<button id="fvolver" style="margin-bottom:10px">Volver a cuentas</button>
+  $('#vista').innerHTML=`<div class="hdr" style="margin-bottom:10px"><button id="fvolver">Volver a cuentas</button><button id="ftraer">⤓ Traer cortes anteriores</button></div>
   <div class="hdr" style="margin-bottom:4px"><span style="font-size:18px;font-weight:700">Cortes para facturar</span><span class="num" style="font-weight:700">${money(l.reduce((a,[,it])=>a+factMonto(it),0))}</span></div>
   <p class="sub" style="margin-bottom:10px">Cortes contados y controlados en Logística desde el ${fmtF(factArranque())}. Revisá cantidad y precio: al facturar, el monto queda fijo como Debe en la cuenta del taller. Si algo estaba mal, borrás ese debe en la cuenta y el corte vuelve acá.</p>
-  ${!S.logiOk?'<div class="empty">Cargando cortes de Logística…</div>':bloques||'<div class="empty">No hay cortes pendientes de facturar. 🎉</div>'}`;
+  ${!S.logiOk?'<div class="empty">Cargando cortes de Logística…</div>':bloques||'<div class="empty">No hay cortes pendientes de facturar. 🎉</div>'}
+  ${(()=>{const nf=Object.entries(S.logi||{}).filter(([,it])=>it&&it.egresos_no_facturar&&it.no_facturar&&!it.facturado_cta_cte);if(!nf.length)return'';
+    return `<details class="card" style="margin-top:6px"><summary style="cursor:pointer;color:var(--muted)">Marcados que no se facturan (${nf.length}) — ver o volver a facturar</summary>
+    ${nf.map(([id,it])=>`<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;padding:8px 0;border-top:1px solid var(--line);flex-wrap:wrap"><span><b>Corte ${esc(it.numero_corte||'s/n°')} · ${esc(it.code||'')}</b><span class="sub" style="display:block;margin:0">${esc(factDest(it))} · ${esc(it.name||'')}</span></span><button data-frevf="${id}" style="padding:6px 10px;font-size:13px">Volver a facturar</button></div>`).join('')}</details>`})()}`;
+  $('#ftraer').onclick=()=>{S.view='traer';window.scrollTo(0,0);render()};
+  document.querySelectorAll('[data-fmov]').forEach(x=>x.onchange=async()=>{const id=x.dataset.fmov,v=x.value;if(!v)return;const it=S.logi[id];
+    await db.ref(`fabrica_v5/logistica/items/${id}/egresos_cuenta`).set(v==='__orig'?null:v);
+    logAcc('editar','corte',id,`Corte ${it.numero_corte||'s/n°'} ${v==='__orig'?'vuelve a '+factDest(it):'se factura a '+ctaNom(v)}`)});
+  document.querySelectorAll('[data-fnofact]').forEach(a=>a.onclick=async ev=>{ev.preventDefault();const id=a.dataset.fnofact,it=S.logi[id];
+    if(!confirm(`¿Corte ${it.numero_corte||'s/n°'} (${factDest(it)}) no se factura?\n\nSale de esta lista. Lo podés volver a facturar desde "Marcados que no se facturan".`))return;
+    await db.ref(`fabrica_v5/logistica/items/${id}`).update({no_facturar:true,egresos_no_facturar:true});logAcc('editar','corte',id,`Corte ${it.numero_corte||'s/n°'} · ${factDest(it)}: no se factura`)});
+  document.querySelectorAll('[data-frevf]').forEach(b=>b.onclick=async()=>{const id=b.dataset.frevf,it=S.logi[id];
+    await db.ref(`fabrica_v5/logistica/items/${id}`).update({no_facturar:null,egresos_no_facturar:null});logAcc('editar','corte',id,`Corte ${it.numero_corte||'s/n°'} · ${factDest(it)}: vuelve a facturar`)});
   $('#fvolver').onclick=()=>{S.view='cuentas';render()};
   document.querySelectorAll('[data-fpre]').forEach(x=>x.onchange=async()=>{const n=parseMonto(x.value);await db.ref(`fabrica_v5/logistica/items/${x.dataset.fpre}/precio_taller`).set(n>0?n:null)});
   document.querySelectorAll('[data-fcant]').forEach(x=>x.onchange=async()=>{const it=S.logi[x.dataset.fcant];const n=Math.max(0,parseInt(x.value)||0);
@@ -660,16 +685,16 @@ function vFact(){
   document.querySelectorAll('[data-desv]').forEach(a=>a.onclick=async ev=>{ev.preventDefault();const t=a.dataset.desv,cid=ctaDeTaller(t);if(!cid)return;
     if(S.cuentas[cid].tallerFab)await db.ref(ROOT+'/cuentas/'+cid+'/tallerFab').remove();else await db.ref(ROOT+'/cuentas/'+cid+'/tallerFab').set('—');render()});
   document.querySelectorAll('[data-fact]').forEach(b=>b.onclick=async()=>{const id=b.dataset.fact,it=S.logi[id];
-    if(!confirm(`¿Facturar corte ${it.numero_corte||''} a ${factDest(it)} por ${money(factMonto(it))}?\n\n${factCant(it)} u. × ${money(it.precio_taller)}. Queda como Debe en la cuenta del taller.`))return;
+    if(!confirm(`¿Facturar corte ${it.numero_corte||''} a ${factCtaDe(it)?ctaNom(factCtaDe(it)):factDest(it)} por ${money(factMonto(it))}?\n\n${factCant(it)} u. × ${money(it.precio_taller)}. Queda como Debe en la cuenta del taller.`))return;
     await factFacturar([id]);});
-  document.querySelectorAll('[data-ftodos]').forEach(b=>b.onclick=async()=>{const t=b.dataset.ftodos;const ids=factPendientes().filter(([,it])=>factDest(it)===t&&it.precio_taller>0).map(([id])=>id);
+  document.querySelectorAll('[data-ftodos]').forEach(b=>b.onclick=async()=>{const t=b.dataset.ftodos;const ids=factPendientes().filter(([,it])=>factGrupo(it)===t&&it.precio_taller>0).map(([id])=>id);
     const tot=ids.reduce((a,id)=>a+factMonto(S.logi[id]),0);
-    if(!confirm(`¿Facturar ${ids.length} cortes a ${t} por ${money(tot)}?`))return;await factFacturar(ids);});
+    if(!confirm(`¿Facturar ${ids.length} cortes a ${factGrupoNom(t)} por ${money(tot)}?`))return;await factFacturar(ids);});
 }
 async function factFacturar(ids){
   const up={},ahora=Date.now();let n=0;
   ids.forEach(id=>{const it=S.logi[id];if(!it||it.facturado_cta_cte||it.no_facturar||!(it.precio_taller>0))return;
-    const cid=ctaDeTaller(factDest(it));if(!cid||monCta(cid)!=='ARS')return;
+    const cid=factCtaDe(it);if(!cid||monCta(cid)!=='ARS')return;
     const cant=factCant(it),pre=Number(it.precio_taller),monto=Math.round(cant*pre*100)/100,nid=uid();
     const descBase=`Corte ${it.numero_corte||'s/n°'}${it.name?' · '+it.name:''}`;
     up[ROOT+'/cargos/'+nid]={cuenta:cid,fecha:factFechaIso(it),desc:`${it.code||''} ${descBase} · ${cant} × ${pre.toLocaleString('es-AR')}`.trim(),descBase,codigo:it.code||null,cantidad:cant,precio:pre,monto,lado:null,motivo:null,logiId:id,creadoPor:S.user,ts:ahora};
@@ -678,6 +703,74 @@ async function factFacturar(ids){
     up[ROOT+'/log/'+uid()]={ts:ahora,user:S.user,accion:'facturar',tipo:'corte',refId:nid,resumen:`${ctaNom(cid)} · ${descBase} · ${money(monto)}`};n++});
   if(!n){toast('No había nada para facturar (revisá precio y cuenta)');return}
   try{await db.ref().update(up);toast(n>1?`${n} cortes facturados`:'Corte facturado')}catch(e){console.error(e);toast('No se pudo facturar: '+(e.message||e))}
+}
+
+
+// ---------- TRAER CORTES ANTERIORES ----------
+// Para dejar bien la cuenta de cada taller con cortes de antes de pasar a egresos:
+//  A) facturados en la app de fábrica (cuenta corriente vieja) que todavía no están en egresos;
+//  B) cerrados en Logística antes del arranque de egresos que nunca se facturaron.
+// Se tildan, se corrige el importe si hace falta y pasan como Debe a la cuenta del taller. No mira pagos:
+// los pagos se corrigen a mano en la cuenta. Cada corte se pasa una vez (si se borra el debe, vuelve acá).
+S.traerSel=S.traerSel||{};S.traerMonto=S.traerMonto||{};
+function traerA(){return Object.entries(S.logi||{}).filter(([,it])=>it&&it.estado==='cerrado'&&it.facturado_cta_cte&&it.facturacion_en!=='egresos'&&!it.egresos_cargo_id)}
+function traerB(){const a=factArranque();return Object.entries(S.logi||{}).filter(([,it])=>it&&it.estado==='cerrado'&&!it.no_facturar&&!it.facturado_cta_cte&&factCierreIso(it)<a)}
+function traerMontoDef(it){return it.facturado_cta_cte?(Number(it.facturacion_monto)||0):factMonto(it)}
+function traerMonto(id){const it=S.logi[id];return S.traerMonto[id]!=null?S.traerMonto[id]:traerMontoDef(it)}
+function vTraer(){
+  const ctasCC=Object.entries(S.cuentas).filter(([,c])=>c.activo!==false&&c.llevaCC).sort((a,b)=>a[1].nombre.localeCompare(b[1].nombre));
+  const bloque=(titulo,lista,esA)=>{
+    if(!lista.length)return '';
+    const grupos={};lista.forEach(([id,it])=>{const k=factGrupo(it);(grupos[k]=grupos[k]||[]).push([id,it])});
+    return `<div class="sub" style="font-weight:800;text-transform:uppercase;letter-spacing:.6px;margin:14px 0 6px">${titulo}</div>`+Object.keys(grupos).sort((a,b)=>factGrupoNom(a).localeCompare(factGrupoNom(b))).map(t=>{
+      const its=grupos[t].sort((a,b)=>factFechaIso(a[1]).localeCompare(factFechaIso(b[1])));
+      const cid=t.startsWith('cta:')?t.slice(4):ctaDeTaller(t);
+      const vinc=cid?`<span class="sub" style="margin:0">→ cuenta <b>${esc(ctaNom(cid))}</b>${monCta(cid)!=='ARS'?' <span style="color:var(--danger)">(en dólares)</span>':''}</span>`
+        :`<select data-vinc="${esc(t)}" style="max-width:260px"><option value="">Elegí la cuenta de este taller…</option>${ctasCC.map(([id,c])=>`<option value="${id}">${esc(c.nombre)} · ${esc(c.tipo)}</option>`).join('')}<option value="__nueva">+ Crear cuenta "${esc(t)}"</option></select>`;
+      return `<div class="card" style="padding:0;overflow:hidden">
+        <div style="padding:10px 14px;background:#fafbfc;border-bottom:1px solid var(--line)"><div class="hdr"><b>🧵 ${esc(factGrupoNom(t))}</b>${vinc}</div>
+          ${cid&&its.length>1?`<a href="#" data-tall="${its.map(([id])=>id).join(',')}" style="font-size:12px;color:var(--muted)">${its.every(([id])=>S.traerSel[id])?'Destildar':'Tildar'} los ${its.length}</a>`:''}</div>
+        ${its.map(([id,it])=>{const cant=it.facturado_cta_cte?null:factCant(it),pre=Number(it.precio_taller)||0;
+          return `<div style="display:flex;gap:10px;align-items:center;padding:10px 14px;border-bottom:1px solid var(--line);flex-wrap:wrap">
+          <input type="checkbox" data-tsel="${id}" ${S.traerSel[id]?'checked':''} ${cid?'':'disabled'} style="width:20px;height:20px;flex:none" aria-label="Pasar corte ${esc(it.numero_corte||'')}">
+          <div style="flex:1;min-width:170px"><div style="font-weight:700">Corte ${esc(it.numero_corte||'s/n°')} · ${esc(it.code||'')}</div>
+            <div class="sub" style="margin:2px 0 0">${esc(it.name||'')} · ${esA?`facturado ${esc(it.facturacion_fecha||'')}`:`entregó ${fmtFc(factFechaIso(it))} · ${cant} u.${pre?' × '+money(pre):' · sin precio'}`}</div></div>
+          <label style="margin:0;font-size:12px;color:var(--muted)">Pasar $<input data-tmon="${id}" class="num" inputmode="decimal" value="${traerMonto(id)?Number(traerMonto(id)).toLocaleString('es-AR'):''}" placeholder="0" style="width:110px;display:block"></label>
+        </div>`}).join('')}
+      </div>`}).join('');
+  };
+  const A=traerA(),B=traerB();
+  const sel=Object.keys(S.traerSel).filter(id=>S.traerSel[id]&&S.logi[id]&&(A.some(([k])=>k===id)||B.some(([k])=>k===id)));
+  const tot=sel.reduce((a,id)=>a+(Number(traerMonto(id))||0),0);
+  $('#vista').innerHTML=`<button id="tvolver" style="margin-bottom:10px">Volver a cortes para facturar</button>
+  <div style="font-size:18px;font-weight:700">Traer cortes anteriores</div>
+  <p class="sub" style="margin-bottom:6px">Tildá los cortes que querés cargar en la cuenta de su taller. Pasan como Debe con el importe que pongas; los pagos los corregís a mano en la cuenta. Si borrás ese debe, el corte vuelve a esta lista.</p>
+  ${!S.logiOk?'<div class="empty">Cargando cortes de Logística…</div>':(bloque('Facturados en la app de fábrica',A,true)+bloque(`Sin facturar (cerrados antes del ${fmtF(factArranque())})`,B,false))||'<div class="empty">No quedan cortes anteriores para traer.</div>'}
+  ${sel.length?`<div class="card" style="position:sticky;bottom:70px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;background:var(--accent-bg);border-color:var(--accent)"><span><b>${sel.length} corte${sel.length>1?'s':''}</b> · ${money(tot)}</span><button id="tpasar" class="pri">Pasar a egresos</button></div>`:''}`;
+  $('#tvolver').onclick=()=>{S.view='fact';window.scrollTo(0,0);render()};
+  document.querySelectorAll('[data-tsel]').forEach(x=>x.onchange=()=>{S.traerSel[x.dataset.tsel]=x.checked;render()});
+  document.querySelectorAll('[data-tall]').forEach(a=>a.onclick=e=>{e.preventDefault();const ids=a.dataset.tall.split(',');const todos=ids.every(id=>S.traerSel[id]);ids.forEach(id=>S.traerSel[id]=!todos);render()});
+  document.querySelectorAll('[data-tmon]').forEach(x=>x.onchange=()=>{S.traerMonto[x.dataset.tmon]=parseMonto(x.value)||0;render()});
+  document.querySelectorAll('[data-vinc]').forEach(x=>x.onchange=async()=>{const t=x.dataset.vinc;let cid=x.value;if(!cid)return;
+    if(cid==='__nueva'){const dup=Object.values(S.cuentas).some(c=>c.activo!==false&&c.nombre.toLowerCase()===t.toLowerCase());if(dup){toast('Ya hay una cuenta con ese nombre: elegila de la lista');x.value='';return}
+      cid=uid();await db.ref(ROOT+'/cuentas/'+cid).set({nombre:t,tipo:'Talleres',llevaCC:true,activo:true,moneda:'ARS',tallerFab:t});logAcc('crear','cuenta',cid,`${t} · Talleres · cta. cte.`);return}
+    await db.ref(ROOT+'/cuentas/'+cid+'/tallerFab').set(t);logAcc('editar','cuenta',cid,`${ctaNom(cid)} vinculada al taller "${t}" de fábrica`)});
+  const bp=$('#tpasar');if(bp)bp.onclick=async()=>{
+    const ok=sel.filter(id=>{const it=S.logi[id],cid=factCtaDe(it);return cid&&monCta(cid)==='ARS'&&Number(traerMonto(id))>0});
+    if(!ok.length){toast('Revisá que cada corte tenga cuenta en pesos e importe');return}
+    if(!confirm(`¿Pasar ${ok.length} corte${ok.length>1?'s':''} a egresos por ${money(ok.reduce((a,id)=>a+Number(traerMonto(id)),0))}?\n\nQuedan como Debe en la cuenta de cada taller.`))return;
+    const up={},ahora=Date.now();
+    ok.forEach(id=>{const it=S.logi[id],cid=factCtaDe(it),monto=Math.round(Number(traerMonto(id))*100)/100,nid=uid(),deFab=!!it.facturado_cta_cte;
+      const descBase=`Corte ${it.numero_corte||'s/n°'}${it.name?' · '+it.name:''}`;
+      const cant=deFab?(Number(it.facturacion_cantidad_manual)||factCant(it)):factCant(it),pre=Number(it.precio_taller)||0;
+      up[ROOT+'/cargos/'+nid]={cuenta:cid,fecha:factFechaIso(it),desc:`${it.code||''} ${descBase}${deFab?' (facturado en fábrica)':''}`.trim(),descBase,codigo:it.code||null,cantidad:cant||null,precio:pre||null,monto,lado:null,motivo:null,logiId:id,traspaso:deFab?'fabrica':'anterior',creadoPor:S.user,ts:ahora};
+      const b=`fabrica_v5/logistica/items/${id}/`;
+      if(deFab) Object.assign(up,{[b+'egresos_cargo_id']:nid,[b+'egresos_traspasado']:true});
+      else Object.assign(up,{[b+'facturado_cta_cte']:true,[b+'facturacion_monto']:monto,[b+'facturacion_fecha']:new Date().toLocaleDateString('es-AR'),[b+'facturacion_fecha_registro']:ahora,[b+'facturacion_registrado_por']:S.user,[b+'facturacion_en']:'egresos',[b+'egresos_cargo_id']:nid});
+      up[ROOT+'/log/'+uid()]={ts:ahora,user:S.user,accion:'traer',tipo:'corte',refId:nid,resumen:`${ctaNom(cid)} · ${descBase} · ${money(monto)}`};
+      delete S.traerSel[id];delete S.traerMonto[id];});
+    try{await db.ref().update(up);toast(ok.length>1?`${ok.length} cortes pasados a egresos`:'Corte pasado a egresos')}catch(e){console.error(e);toast('No se pudo pasar: '+(e.message||e))}
+  };
 }
 
 // ---------- CARGAR DEBE (cargos) ----------
