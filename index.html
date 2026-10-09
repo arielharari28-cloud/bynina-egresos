@@ -1,0 +1,2082 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>byNINA — Dashboard</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}
+  .spin{animation:spin 1s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+  .pill{padding:.4rem .85rem;font-size:.75rem;font-weight:600;border-radius:9999px;background:#fff;color:#475569;border:1px solid #e2e8f0;cursor:pointer;white-space:nowrap;}
+  .pill:hover{background:#f8fafc;}
+  .pill.active{background:#4f46e5;color:#fff;border-color:#4f46e5;}
+  .navitem{display:flex;align-items:center;gap:.6rem;padding:.6rem .7rem;border-radius:.6rem;font-size:.9rem;font-weight:600;color:#475569;cursor:pointer;}
+  .navitem:hover{background:#f8fafc;}
+  .navitem.active{background:#eef2ff;color:#4338ca;}
+  .card{background:#fff;border:1px solid #e2e8f0;border-radius:.9rem;}
+  .chip{font-size:.7rem;font-weight:600;padding:.2rem .55rem;border-radius:9999px;}
+  .chip-low{background:#fee2e2;color:#b91c1c;}
+  .chip-ok{background:#f1f5f9;color:#475569;}
+  .chip-green{background:#dcfce7;color:#15803d;}
+  .chip-amber{background:#fef3c7;color:#92400e;}
+  .view{display:none;}
+  .view.active{display:block;}
+</style>
+</head>
+<body class="h-full flex bg-slate-50 min-h-screen">
+
+<aside class="hidden md:flex w-[230px] shrink-0 bg-white border-r border-slate-200 flex-col h-screen sticky top-0">
+  <div class="px-5 py-5 border-b border-slate-100">
+    <div class="text-[11px] font-semibold text-slate-400 uppercase tracking-widest mb-1">byNINA</div>
+    <div class="text-lg font-bold text-slate-800 leading-tight">Dashboard</div>
+  </div>
+  <nav class="flex-1 py-4 px-2 space-y-0.5" id="sidebarNav">
+    <div class="navitem active" data-view="dashboard">📊 Dashboard</div>
+    <div class="navitem" data-view="foco">🔎 Foco</div>
+    <div class="navitem" data-view="clasificar">🏷️ Clasificar <span id="clasifBadge" class="chip" style="display:none;background:#dc2626;color:#fff;margin-left:auto"></span></div>
+    <div class="navitem" data-view="stock">📦 Stock general</div>
+    <div class="navitem" data-view="ultimas">⚠️ Últimas unidades</div>
+    <div class="navitem" data-view="vendidos">🏆 Productos vendidos</div>
+    <div class="navitem" data-view="nuevos">✨ Productos nuevos</div>
+    <div class="navitem" data-view="sinventas">📭 Sin ventas</div>
+    <div class="navitem" data-view="objetivos">🎯 Objetivos</div>
+    <div class="navitem" data-view="ganadores">🏅 Ganadores</div>
+  </nav>
+  <div class="px-4 py-3 border-t border-slate-100 text-xs text-slate-400">Datos vía Tienda Nube</div>
+</aside>
+
+<main class="flex-1 min-w-0 p-4 md:p-6 max-w-[1100px] mx-auto">
+
+  <div id="loading" class="flex items-center justify-center h-48 text-slate-400 gap-3">
+    <div class="w-5 h-5 border-2 border-slate-200 border-t-indigo-500 rounded-full spin"></div>Cargando dashboard...
+  </div>
+
+  <div id="app" class="hidden">
+
+    <!-- ===================== DASHBOARD ===================== -->
+    <div class="view active" data-view="dashboard">
+      <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
+        <div>
+          <h1 class="text-xl md:text-2xl font-bold text-slate-900">Dashboard</h1>
+          <p id="ultimaActualizacion" class="text-xs text-slate-400 mt-0.5">Cargando...</p>
+        </div>
+        <button id="btnActualizar" class="px-4 py-2 text-sm font-semibold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-2">🔄 Actualizar ahora</button>
+      </div>
+
+      <div class="flex flex-wrap gap-1.5 mb-5" id="pillsPeriodoDash"></div>
+
+      <div class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">Ventas del período</div>
+      <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+        <div class="card p-5"><div class="text-xs font-semibold text-slate-500 mb-2">💰 Facturación</div><div class="text-2xl font-bold" id="kFacturacion">—</div><div class="text-xs mt-1" id="kFacturacionDelta"></div></div>
+        <div class="card p-5"><div class="text-xs font-semibold text-slate-500 mb-2">🛒 Pedidos</div><div class="text-2xl font-bold" id="kPedidos">—</div><div class="text-xs mt-1" id="kPedidosDelta"></div></div>
+        <div class="card p-5"><div class="text-xs font-semibold text-slate-500 mb-2">🏷️ Ticket promedio</div><div class="text-2xl font-bold" id="kTicket">—</div></div>
+        <div class="card p-5"><div class="text-xs font-semibold text-slate-500 mb-2">📦 Unidades vendidas</div><div class="text-2xl font-bold" id="kUnidades">—</div></div>
+        <div class="card p-5 border-indigo-200 bg-indigo-50"><div class="text-xs font-semibold text-indigo-500 mb-2">🏆 Categoría estrella</div><div class="text-lg font-bold text-indigo-700" id="kCategoriaTop">—</div><div class="text-xs mt-1 text-indigo-500" id="kCategoriaTopSub"></div></div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <div class="card p-5">
+          <div class="flex items-center justify-between mb-3"><div class="font-bold text-sm">🏆 Más vendidos</div><div class="text-xs text-indigo-600 font-semibold cursor-pointer" data-goto="vendidos">Ver más →</div></div>
+          <div id="miniMasVendidos" class="space-y-2 text-sm"></div>
+        </div>
+        <div class="card p-5">
+          <div class="flex items-center justify-between mb-3"><div class="font-bold text-sm">⚠️ Últimas unidades</div><div class="text-xs text-indigo-600 font-semibold cursor-pointer" data-goto="ultimas">Ver más →</div></div>
+          <div id="miniUltimas" class="space-y-2 text-sm"></div>
+        </div>
+        <div class="card p-5">
+          <div class="flex items-center justify-between mb-3"><div class="font-bold text-sm">📭 Sin ventas</div><div class="text-xs text-indigo-600 font-semibold cursor-pointer" data-goto="sinventas">Ver más →</div></div>
+          <div id="miniSinVentas" class="space-y-2 text-sm"></div>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div class="card p-5">
+          <div class="font-bold text-sm mb-3">🗂️ Por categoría</div>
+          <div id="miniCategorias" class="space-y-2 text-sm"></div>
+        </div>
+        <div class="card p-5">
+          <div class="font-bold text-sm mb-3">📐 Por talle</div>
+          <div id="miniTalles" class="space-y-2 text-sm"></div>
+        </div>
+        <div class="card p-5">
+          <div class="font-bold text-sm mb-3">🏷️ Por tag / enfoque</div>
+          <div id="miniTags" class="space-y-2 text-sm"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===================== STOCK GENERAL ===================== -->
+    <div class="view" data-view="foco">
+      <h1 class="text-xl md:text-2xl font-bold text-slate-900 flex items-center gap-2">🔎 Foco</h1>
+      <p class="text-sm text-slate-500 mt-1 mb-4">Lo que clasificaste a mano en 🏷️ Clasificar, por grupo, tendencia o categoría. “Tienda Nube” es la vista anterior, por las categorías de la web.</p>
+      <div class="flex flex-wrap gap-2 items-center mb-3" id="focoModoBar"></div>
+      <div class="flex flex-wrap gap-2 items-center mb-3"><span class="text-xs text-slate-500 font-medium">Vendidos en los últimos:</span><div class="flex flex-wrap gap-1.5" id="focoPeriodo"></div></div>
+      <div class="flex flex-wrap gap-1.5 items-center mb-5" id="focoCats"></div>
+      <div id="focoLista" class="space-y-4"></div>
+      <p class="text-[11px] text-slate-400 mt-4" id="focoLeyenda"></p>
+    </div>
+
+    <div class="view" data-view="clasificar">
+      <h1 class="text-xl md:text-2xl font-bold text-slate-900 flex items-center gap-2">🏷️ Clasificar mercadería</h1>
+      <p class="text-sm text-slate-500 mt-1 mb-4">A cada producto: su categoría, un grupo (New In, Sale, Básicos o Más vendidos — uno solo) y las tendencias que quieras. Es lo que usa el Foco. Rechazar lo saca del foco.</p>
+      <div class="flex flex-wrap gap-2 items-center mb-4"><div id="clasifTabs" class="flex flex-wrap gap-1.5"></div><input id="clasifBusca" type="text" placeholder="Buscar producto…" class="border border-slate-200 rounded-lg px-3 py-1.5 text-sm flex-1 min-w-[180px]" /></div>
+      <div id="clasifLista" class="space-y-3"></div>
+    </div>
+
+    <div class="view" data-view="stock">
+      <h1 class="text-xl md:text-2xl font-bold text-slate-900 flex items-center gap-2">📦 Stock general</h1>
+      <p class="text-sm text-slate-500 mt-1 mb-4" id="stockCount"></p>
+
+      <input type="search" id="stockBuscar" placeholder="Buscar por nombre..." class="w-full border border-slate-200 rounded-lg px-4 py-2.5 text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-indigo-300" />
+
+      <div class="flex flex-wrap gap-2 items-center mb-3">
+        <span class="text-xs text-slate-500 font-medium">Ordenar:</span>
+        <div class="flex flex-wrap gap-1.5" id="stockOrden">
+          <button class="pill active" data-crit="nombre">Nombre (A-Z)</button>
+          <button class="pill" data-crit="mayorStock">Mayor stock</button>
+          <button class="pill" data-crit="menorStock">Menor stock</button>
+          <button class="pill" data-crit="mayorValor">Mayor valor</button>
+          <button class="pill" data-crit="masVendidos">Más vendidos</button>
+          <button class="pill" data-crit="masRecientes">Más recientes</button>
+          <button class="pill" data-crit="masAntiguos">Más antiguos</button>
+        </div>
+      </div>
+
+      <div class="flex flex-wrap gap-2 items-center mb-3">
+        <span class="text-xs text-slate-500 font-medium">Stock:</span>
+        <input type="number" min="0" id="stockMin" placeholder="Mín" class="w-20 border border-slate-200 rounded-lg px-3 py-1.5 text-sm" />
+        <span class="text-xs text-slate-400">—</span>
+        <input type="number" min="0" id="stockMax" placeholder="Máx" class="w-20 border border-slate-200 rounded-lg px-3 py-1.5 text-sm" />
+        <select id="stockCategoria" class="border border-slate-200 rounded-lg px-3 py-1.5 text-sm ml-2"><option value="">Todas las categorías</option></select>
+      </div>
+
+      <div class="flex flex-wrap gap-2 items-center mb-5">
+        <label class="flex items-center gap-1.5 text-xs text-slate-500 cursor-pointer select-none">
+          <input type="checkbox" id="stockOcultos" class="rounded border-slate-300 text-indigo-600" />Ver ocultos
+        </label>
+      </div>
+
+      <div id="stockLista" class="space-y-3"></div>
+    </div>
+
+    <!-- ===================== ÚLTIMAS UNIDADES ===================== -->
+    <div class="view" data-view="ultimas">
+      <h1 class="text-xl md:text-2xl font-bold text-slate-900 flex items-center gap-2">⚠️ Últimas unidades</h1>
+      <p class="text-sm text-slate-500 mt-1 mb-4">Ordenados por días hasta agotarse según el ritmo de ventas del período elegido.</p>
+
+      <div class="flex flex-wrap gap-1.5 mb-3" id="pillsPeriodoUltimas"></div>
+
+      <div class="flex flex-wrap gap-2 items-center mb-3">
+        <select id="ultimasCategoria" class="border border-slate-200 rounded-lg px-3 py-1.5 text-sm"><option value="">Todas las categorías</option></select>
+        <input type="search" id="ultimasBuscar" placeholder="Buscar producto..." class="flex-1 min-w-[180px] border border-slate-200 rounded-lg px-3 py-1.5 text-sm" />
+      </div>
+
+      <div class="flex flex-wrap gap-1.5 mb-5">
+        <button class="pill active" id="ultimasRapido">Se agotan más rápido (≤30 días)</button>
+        <button class="pill" id="ultimasTodos">Todos los productos</button>
+      </div>
+
+      <div id="ultimasLista" class="space-y-3"></div>
+    </div>
+
+    <!-- ===================== PRODUCTOS VENDIDOS ===================== -->
+    <div class="view" data-view="vendidos">
+      <h1 class="text-xl md:text-2xl font-bold text-slate-900 flex items-center gap-2">🏆 Productos vendidos</h1>
+      <p class="text-sm text-slate-500 mt-1 mb-4" id="vendidosCount"></p>
+
+      <div class="flex flex-wrap gap-1.5 mb-3" id="pillsPeriodoVendidos"></div>
+
+      <div class="flex flex-wrap gap-2 items-center mb-3">
+        <select id="vendidosCategoria" class="border border-slate-200 rounded-lg px-3 py-1.5 text-sm"><option value="">Todas las categorías</option></select>
+        <div class="flex gap-1.5" id="vendidosCriterio">
+          <button class="pill active" data-crit="unidades">Por unidades</button>
+          <button class="pill" data-crit="facturacion">Por facturación</button>
+        </div>
+        <div class="flex gap-1.5" id="vendidosVistaSel">
+          <button class="pill active" data-vista="sinVariantes">Sin variantes</button>
+          <button class="pill" data-vista="conVariantes">Con variantes</button>
+        </div>
+        <input type="search" id="vendidosBuscar" placeholder="Buscar producto..." class="flex-1 min-w-[180px] border border-slate-200 rounded-lg px-3 py-1.5 text-sm" />
+      </div>
+
+      <div class="card p-5 mb-4 border-indigo-200 bg-indigo-50/40" id="vendidosGanadoresBox">
+        <div class="flex items-center justify-between mb-1">
+          <div class="font-bold text-sm text-indigo-800">🏅 Productos ganadores</div>
+          <span class="text-xs text-indigo-500" id="vendidosGanadoresPromedio"></span>
+        </div>
+        <p class="text-xs text-slate-500 mb-3" id="vendidosGanadoresDesc"></p>
+        <div id="vendidosGanadoresLista" class="grid grid-cols-1 md:grid-cols-2 gap-2.5"></div>
+      </div>
+
+      <div class="card overflow-hidden">
+        <div class="px-4 py-2 text-xs text-slate-400 border-b border-slate-100 bg-slate-50">💡 Hacé click en un producto para ver qué colores y talles reponer.</div>
+        <table class="w-full text-sm">
+          <thead id="vendidosTablaHead">
+            <tr class="text-left text-slate-400 text-xs uppercase border-b border-slate-100 bg-slate-50">
+              <th class="py-2.5 px-4">#</th>
+              <th class="py-2.5 px-4">Producto</th>
+              <th class="py-2.5 px-4">Color que más sale</th>
+              <th class="py-2.5 px-4 text-right">Unidades</th>
+              <th class="py-2.5 px-4 text-right">Pedidos</th>
+              <th class="py-2.5 px-4 text-right">Última venta</th>
+            </tr>
+          </thead>
+          <tbody id="vendidosTabla"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ===================== PRODUCTOS NUEVOS ===================== -->
+    <div class="view" data-view="nuevos">
+      <h1 class="text-xl md:text-2xl font-bold text-slate-900 flex items-center gap-2">✨ Productos nuevos</h1>
+      <p class="text-sm text-slate-500 mt-1 mb-4" id="nuevosCount"></p>
+
+      <div class="flex flex-wrap gap-1.5 mb-3" id="pillsPeriodoNuevos"></div>
+      <input type="search" id="nuevosBuscar" placeholder="Buscar por nombre..." class="w-full border border-slate-200 rounded-lg px-4 py-2.5 text-sm mb-5" />
+
+      <div class="mb-2 flex items-center gap-2">
+        <span class="w-2 h-2 rounded-full bg-green-500"></span>
+        <span class="text-xs font-bold text-slate-500 uppercase tracking-wide" id="nuevosVendieronTitulo">YA VENDIERON</span>
+      </div>
+      <div id="nuevosVendieron" class="space-y-3 mb-6"></div>
+
+      <div class="mb-2 flex items-center gap-2">
+        <span class="w-2 h-2 rounded-full bg-slate-400"></span>
+        <span class="text-xs font-bold text-slate-500 uppercase tracking-wide" id="nuevosSinVentaTitulo">SIN VENTAS</span>
+      </div>
+      <div id="nuevosSinVenta" class="space-y-3"></div>
+    </div>
+
+    <!-- ===================== SIN VENTAS ===================== -->
+    <div class="view" data-view="sinventas">
+      <h1 class="text-xl md:text-2xl font-bold text-slate-900 flex items-center gap-2">📭 Sin ventas</h1>
+      <p class="text-sm text-slate-500 mt-1 mb-4" id="sinventasCount"></p>
+
+      <div class="flex flex-wrap gap-1.5 mb-3" id="pillsPeriodoSinVentas"></div>
+
+      <div class="flex flex-wrap gap-2 items-center mb-3">
+        <select id="sinventasCategoria" class="border border-slate-200 rounded-lg px-3 py-1.5 text-sm"><option value="">Todas las categorías</option></select>
+        <div class="flex gap-1.5" id="sinventasStockFiltro">
+          <button class="pill active" data-crit="conStock">Con stock</button>
+          <button class="pill" data-crit="todos">Todos</button>
+          <button class="pill" data-crit="sinStock">Sin stock</button>
+        </div>
+      </div>
+
+      <div class="flex flex-wrap gap-2 items-center mb-5">
+        <span class="text-xs text-slate-500 font-medium">Ordenar:</span>
+        <div class="flex flex-wrap gap-1.5" id="sinventasOrden">
+          <button class="pill active" data-crit="masNuevos">Más nuevos</button>
+          <button class="pill" data-crit="mayorStock">Mayor stock</button>
+          <button class="pill" data-crit="menorStock">Menor stock</button>
+          <button class="pill" data-crit="sinVenderMasTiempo">Sin vender más tiempo</button>
+          <button class="pill" data-crit="nombre">Nombre</button>
+        </div>
+        <input type="search" id="sinventasBuscar" placeholder="Buscar producto..." class="flex-1 min-w-[180px] border border-slate-200 rounded-lg px-3 py-1.5 text-sm" />
+      </div>
+
+      <div id="sinventasLista" class="space-y-3"></div>
+    </div>
+
+    <!-- ===================== OBJETIVOS ===================== -->
+    <div class="view" data-view="objetivos">
+      <h1 class="text-xl md:text-2xl font-bold text-slate-900 flex items-center gap-2">🎯 Objetivos de facturación</h1>
+      <p class="text-sm text-slate-500 mt-1 mb-4">Objetivo calculado para cerrar el faltante de cash flow ($40.435.000), repartido proporcionalmente entre web y local sobre la base de agosto 2026.</p>
+
+      <div class="flex flex-wrap gap-2 mb-5">
+        <div class="flex gap-1.5" id="objetivosPeriodo">
+          <button class="pill active" data-periodo="mensual">Mensual</button>
+          <button class="pill" data-periodo="semanal">Semanal</button>
+          <button class="pill" data-periodo="custom">Personalizado</button>
+        </div>
+      </div>
+
+      <div id="objetivosCustomFechas" class="hidden flex items-end gap-3 mb-5 flex-wrap">
+        <div>
+          <label class="text-xs text-slate-500 font-medium block mb-1">Desde</label>
+          <input type="date" id="objetivosCustomDesde" class="border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+        </div>
+        <div>
+          <label class="text-xs text-slate-500 font-medium block mb-1">Hasta</label>
+          <input type="date" id="objetivosCustomHasta" class="border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+        </div>
+        <button id="objetivosCustomAplicar" class="px-4 py-2 text-sm font-semibold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors">Aplicar</button>
+        <div class="text-xs text-slate-400 max-w-xs">Se compara contra el mismo Nº de días inmediatamente anterior. Local: solo suma semanas cuyo lunes caiga dentro del rango — es aproximado.</div>
+      </div>
+
+      <div id="objetivosCards" class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6"></div>
+
+      <div class="card p-5 mb-6" id="objetivosCategoriaBox">
+        <div class="flex items-center justify-between gap-2 mb-1">
+          <div class="font-bold text-sm">📐 Por categoría — solo prenda real (web)</div>
+          <button id="btnExportarExcelWeb" class="px-3 py-1.5 text-xs font-semibold bg-slate-800 text-white rounded-lg hover:bg-slate-700 transition-colors flex-shrink-0 whitespace-nowrap">⬇️ Exportar Excel (por producto)</button>
+        </div>
+        <p class="text-xs text-slate-500 mb-3">Filtrado a categorías de producto reales, ignorando etiquetas de promo/colección (Winter Sale, Liquidación, etc.). Útil para planificar cuánto cortar de cada categoría.</p>
+        <div id="objetivosCategoriaTabla"></div>
+        <p class="text-[11px] text-slate-400 mt-3">¿Falta o sobra alguna categoría en la lista? Avisame para ajustar el filtro.</p>
+      </div>
+
+      <div class="card p-5" id="objetivosLocalCarga">
+        <div class="font-bold text-sm mb-1">🗓️ ¿Qué fecha estás cargando?</div>
+        <p class="text-xs text-slate-500 mb-2">Elegí exactamente la fecha que quieras — no se ajusta sola a ningún lunes. Usalo como identificador de esa carga (por ejemplo, el último día del período que exportaste de Ninox). Podés volver para atrás y cargar fechas pasadas una por una.</p>
+        <input type="date" id="objetivosSemanaCarga" class="border border-slate-200 rounded-lg px-3 py-2 text-sm mb-1" onchange="renderSemanaCargaEstado()" />
+        <div id="objetivosSemanaCargaEstado" class="text-xs text-slate-400 mb-3"></div>
+
+        <div class="border-t border-slate-100 pt-4">
+          <div class="font-bold text-sm mb-1">📄 Subir Excel de Ninox</div>
+          <p class="text-xs text-slate-500 mb-3">Filtrá ese período en Ninox antes de exportar (una semana). Categoriza cada artículo por palabra clave en la Descripción.</p>
+          <input type="file" id="objetivosExcelInput" accept=".xlsx,.xls" class="text-sm mb-2" />
+          <div id="objetivosExcelPreview" class="hidden mt-3"></div>
+        </div>
+
+        <div class="border-t border-slate-100 mt-5 pt-4">
+          <div class="text-xs font-semibold text-slate-500 mb-2">O cargar el total a mano</div>
+          <div class="grid grid-cols-2 gap-3 mb-3">
+            <div>
+              <label class="text-xs text-slate-500 font-medium block mb-1">Facturación de la semana</label>
+              <input type="number" id="objetivosLocalFact" placeholder="$ 0" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label class="text-xs text-slate-500 font-medium block mb-1">Unidades de la semana</label>
+              <input type="number" id="objetivosLocalUnid" placeholder="0" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+            </div>
+          </div>
+          <button id="objetivosLocalGuardar" class="px-4 py-2 text-sm font-semibold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors">Guardar semana</button>
+          <span id="objetivosLocalGuardadoMsg" class="text-xs text-green-600 font-semibold ml-3"></span>
+        </div>
+      </div>
+
+      <div class="card p-5 mt-4" id="objetivosSemanasResumen"></div>
+    </div>
+
+    <!-- ===================== GANADORES ===================== -->
+    <div class="view" data-view="ganadores">
+      <h1 class="text-xl md:text-2xl font-bold text-slate-900 flex items-center gap-2">🏅 Productos ganadores</h1>
+      <p class="text-sm text-slate-500 mt-1 mb-1" id="ganadoresDesc"></p>
+      <p class="text-xs text-slate-400 mb-4">Cortado = suma de lo cortado en Fábrica en el período, para los artículos cuyo código de Fábrica coincide con el inicio del SKU de Tiendanube. Si no hay match, esa línea no se muestra (no significa que no se cortó nada). Tocá una tarjeta para ver colores y talles.</p>
+
+      <div class="flex flex-wrap items-center gap-2 mb-5">
+        <div class="flex gap-1.5" id="ganadoresPeriodo">
+          <button class="pill active" data-periodo="mensual">Este mes</button>
+          <button class="pill" data-periodo="quincena">Última quincena</button>
+        </div>
+        <select id="ganadoresCategoria" class="border border-slate-200 rounded-lg px-3 py-1.5 text-sm"></select>
+        <div class="flex gap-1.5" id="ganadoresOrdenModo">
+          <button class="pill active" data-modo="auto">Automático</button>
+          <button class="pill" data-modo="manual">✋ Mi orden</button>
+        </div>
+        <span class="text-xs text-slate-400" id="ganadoresOrdenHint"></span>
+      </div>
+
+      <div id="ganadoresGrid" class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3"></div>
+    </div>
+
+    <!-- ===================== MODAL REPOSICIÓN ===================== -->
+    <div id="modalReposicion" class="hidden fixed inset-0 bg-black/40 items-center justify-center z-50 p-4" onclick="if(event.target===this) cerrarReposicion();">
+      <div class="bg-white rounded-xl max-w-3xl w-full max-h-[85vh] overflow-y-auto p-6">
+        <div class="flex items-start justify-between mb-1 gap-3">
+          <div class="min-w-0">
+            <div class="text-[11px] font-semibold text-indigo-500 uppercase tracking-wide" id="reposicionPeriodoLabel"></div>
+            <h2 class="text-lg font-bold text-slate-900 leading-tight" id="reposicionTitulo"></h2>
+          </div>
+          <button class="text-slate-400 hover:text-slate-700 text-2xl leading-none flex-shrink-0" onclick="cerrarReposicion()">&times;</button>
+        </div>
+        <div class="flex items-center justify-between gap-3 mb-1">
+          <p class="text-xs text-slate-400 mt-1 mb-0">Prioridad calculada según stock actual vs. velocidad de venta en el período elegido.</p>
+          <button id="btnMandarFabrica" class="px-3 py-1.5 text-xs font-semibold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex-shrink-0 whitespace-nowrap" onclick="mandarReposicionAFabrica()">🧵 Mandar corte a Fábrica</button>
+        </div>
+        <div id="reposicionFabricaEstado" class="text-xs mb-3"></div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+          <div class="card p-4">
+            <div class="font-bold text-sm mb-2">🎨 Colores a reponer</div>
+            <div id="reposicionColores" class="space-y-1.5 text-sm"></div>
+          </div>
+          <div class="card p-4">
+            <div class="font-bold text-sm mb-2">📐 Talles para hacer énfasis</div>
+            <div id="reposicionTalles" class="space-y-1.5 text-sm"></div>
+          </div>
+        </div>
+
+        <div class="card p-4 mb-5">
+          <div class="font-bold text-sm mb-2">📦 Stock por color</div>
+          <div id="reposicionStockColor" class="space-y-1.5 text-sm"></div>
+        </div>
+
+        <div class="card overflow-hidden">
+          <table class="w-full text-sm">
+            <thead id="reposicionTablaHead"></thead>
+            <tbody id="reposicionTabla"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<script>
+  const firebaseConfig = {
+    apiKey: "TU_API_KEY",
+    databaseURL: "https://bynina-c1eec-default-rtdb.firebaseio.com",
+    projectId: "bynina-c1eec",
+  };
+  firebase.initializeApp(firebaseConfig);
+  const db = firebase.database();
+
+  let data = null;
+  let periodoDash = "30dias";
+  let periodoUltimas = "30dias";
+  let periodoVendidos = "30dias";
+  let periodoNuevos = "15dias";
+  let periodoSinVentas = "30dias";
+
+  let stockOrden = "nombre", stockBuscar = "", stockMin = null, stockMax = null, stockCategoria = "", stockOcultos = false;
+  let ultimasRapido = true, ultimasCategoria = "", ultimasBuscar = "";
+  let vendidosCriterio = "unidades", vendidosCategoria = "", vendidosBuscar = "", vendidosVista = "sinVariantes";
+  let nuevosBuscar = "";
+  let sinventasStock = "conStock", sinventasOrden = "masNuevos", sinventasCategoria = "", sinventasBuscar = "";
+
+  let objetivosPeriodo = "mensual";
+  let objetivosLocal = {};
+  let objetivosCustomDesde = null, objetivosCustomHasta = null; // strings "YYYY-MM-DD"
+
+  // ---------------- Objetivos: constantes ----------------
+  // Objetivo fijo para cerrar el faltante de cash flow de septiembre 2026 ($40.435.000),
+  // repartido proporcionalmente sobre la facturación real de agosto 2026 de cada canal.
+  // Estos valores no se recalculan solos — si el faltante cambia, hay que actualizarlos acá.
+  const OBJETIVOS_CRECIMIENTO = 1.340078;
+  const OBJETIVOS_SEMANAS_POR_MES = 4.3;
+  const OBJETIVOS_BASE = {
+    web: { facturacion: 57488249, unidades: 3439 },
+    local: { facturacion: 61410799, unidades: 4627 },
+  };
+  function objetivoMensual(canal) {
+    const base = OBJETIVOS_BASE[canal];
+    return { facturacion: Math.round(base.facturacion * OBJETIVOS_CRECIMIENTO), unidades: Math.round(base.unidades * OBJETIVOS_CRECIMIENTO) };
+  }
+  function objetivoSemanal(canal) {
+    const m = objetivoMensual(canal);
+    return { facturacion: Math.round(m.facturacion / OBJETIVOS_SEMANAS_POR_MES), unidades: Math.round(m.unidades / OBJETIVOS_SEMANAS_POR_MES) };
+  }
+  function objetivoPorPeriodo(canal) {
+    return objetivosPeriodo === "mensual" ? objetivoMensual(canal) : objetivoSemanal(canal);
+  }
+
+  function mondayOfWeek(d) {
+    const date = new Date(d);
+    const day = date.getDay();
+    const diff = (day === 0 ? -6 : 1) - day;
+    date.setDate(date.getDate() + diff);
+    date.setHours(0, 0, 0, 0);
+    return date;
+  }
+  function weekKey(d) { return mondayOfWeek(d).toISOString().slice(0, 10); }
+  function semanaActualKey() { return weekKey(new Date()); }
+  // Semana que está seleccionada en el selector de carga del Local (por defecto, la actual).
+  // Siempre se normaliza al lunes de esa semana, sea cual sea el día que se haya elegido.
+  function semanaCargaKey() {
+    const v = document.getElementById("objetivosSemanaCarga")?.value;
+    return v || semanaActualKey();
+  }
+  function renderSemanaCargaEstado() {
+    const key = semanaCargaKey();
+    const s = (objetivosLocal.semanas || {})[key];
+    const el = document.getElementById("objetivosSemanaCargaEstado");
+    const fecha = new Date(key + "T00:00:00");
+    const opts = { day: "numeric", month: "short", year: "numeric" };
+    const fechaTxt = fecha.toLocaleDateString("es-AR", opts);
+    el.textContent = s
+      ? `${fechaTxt}: ya tiene ${fmtMoney(s.facturacion || 0)} · ${fmtNum(s.unidades || 0)} u. cargados — subir/guardar de nuevo lo reemplaza.`
+      : `${fechaTxt}: todavía sin datos cargados.`;
+    renderSemanasResumen();
+  }
+  function renderSemanasResumen() {
+    const cont = document.getElementById("objetivosSemanasResumen");
+    if (!cont) return;
+    const semanas = objetivosLocal.semanas || {};
+    const keys = Object.keys(semanas).sort().reverse();
+    if (!keys.length) { cont.innerHTML = '<div class="text-xs text-slate-400">Todavía no cargaste ninguna fecha del local.</div>'; return; }
+    const opts = { day: "numeric", month: "short" };
+    cont.innerHTML = `<div class="text-xs font-semibold text-slate-500 mb-2">Fechas cargadas del local</div>` + keys.map(key => {
+      const s = semanas[key];
+      const fecha = new Date(key + "T00:00:00");
+      return `<div class="flex justify-between text-xs py-1 border-b border-slate-50 last:border-0">
+        <span class="text-slate-500">${fecha.toLocaleDateString("es-AR", opts)}</span>
+        <span><b>${fmtMoney(s.facturacion || 0)}</b> · ${fmtNum(s.unidades || 0)} u.</span>
+      </div>`;
+    }).join("");
+  }
+
+  // ---- rango custom: helpers de fechas en formato "YYYY-MM-DD" ----
+  function diasEntre(desdeStr, hastaStr) {
+    const d1 = new Date(desdeStr + "T00:00:00"), d2 = new Date(hastaStr + "T00:00:00");
+    return Math.round((d2 - d1) / 86400000) + 1;
+  }
+  function rangoAnteriorStr(desdeStr, hastaStr) {
+    const dias = diasEntre(desdeStr, hastaStr);
+    const d1 = new Date(desdeStr + "T00:00:00");
+    const prevHasta = new Date(d1.getTime() - 86400000);
+    const prevDesde = new Date(prevHasta.getTime() - (dias - 1) * 86400000);
+    const f = d => d.toISOString().slice(0, 10);
+    return { desde: f(prevDesde), hasta: f(prevHasta) };
+  }
+  function sumarPorDiaRango(desdeStr, hastaStr) {
+    const porDia = (data && data.porDia) || {};
+    let facturacion = 0, unidades = 0;
+    Object.entries(porDia).forEach(([key, v]) => {
+      if (key >= desdeStr && key <= hastaStr) {
+        facturacion += Number(v.facturacion || 0);
+        unidades += Number(v.unidades || 0);
+      }
+    });
+    return { facturacion, unidades };
+  }
+  function sumarSemanasEnRango(desdeStr, hastaStr) {
+    const semanas = objetivosLocal.semanas || {};
+    let facturacion = 0, unidades = 0;
+    Object.keys(semanas).forEach(key => {
+      if (key >= desdeStr && key <= hastaStr) {
+        facturacion += Number(semanas[key].facturacion || 0);
+        unidades += Number(semanas[key].unidades || 0);
+      }
+    });
+    return { facturacion, unidades };
+  }
+
+  // Suma las semanas cargadas del local cuyo lunes cae dentro del mes actual (o del rango custom elegido).
+  function localActualPeriodo() {
+    if (objetivosPeriodo === "custom" && objetivosCustomDesde && objetivosCustomHasta) {
+      return sumarSemanasEnRango(objetivosCustomDesde, objetivosCustomHasta);
+    }
+    const semanas = objetivosLocal.semanas || {};
+    if (objetivosPeriodo === "semanal") {
+      const s = semanas[semanaActualKey()];
+      return { facturacion: (s && s.facturacion) || 0, unidades: (s && s.unidades) || 0 };
+    }
+    const now = new Date();
+    let facturacion = 0, unidades = 0;
+    Object.keys(semanas).forEach(key => {
+      const fecha = new Date(key + "T00:00:00");
+      if (fecha.getMonth() === now.getMonth() && fecha.getFullYear() === now.getFullYear()) {
+        facturacion += Number(semanas[key].facturacion || 0);
+        unidades += Number(semanas[key].unidades || 0);
+      }
+    });
+    return { facturacion, unidades };
+  }
+
+  function localCategoriasMesActual() {
+    const semanas = objetivosLocal.semanas || {};
+    const now = new Date();
+    const out = {};
+    Object.keys(semanas).forEach(key => {
+      const fecha = new Date(key + "T00:00:00");
+      if (fecha.getMonth() !== now.getMonth() || fecha.getFullYear() !== now.getFullYear()) return;
+      Object.entries(semanas[key].categorias || {}).forEach(([cat, v]) => {
+        const prev = out[cat] || { facturacion: 0, unidades: 0 };
+        prev.facturacion += Number(v.facturacion || 0);
+        prev.unidades += Number(v.unidades || 0);
+        out[cat] = prev;
+      });
+    });
+    return out;
+  }
+  function localAnteriorPeriodo() {    if (!objetivosCustomDesde || !objetivosCustomHasta) return { facturacion: 0, unidades: 0 };
+    const { desde, hasta } = rangoAnteriorStr(objetivosCustomDesde, objetivosCustomHasta);
+    return sumarSemanasEnRango(desde, hasta);
+  }
+
+  function webActualPeriodo() {
+    if (objetivosPeriodo === "custom" && objetivosCustomDesde && objetivosCustomHasta) {
+      return sumarPorDiaRango(objetivosCustomDesde, objetivosCustomHasta);
+    }
+    const key = objetivosPeriodo === "mensual" ? "estemes" : "7dias";
+    const kpis = (data.kpisPorPeriodo || {})[key] || {};
+    return { facturacion: kpis.facturacionTotal || 0, unidades: kpis.unidadesVendidas || 0 };
+  }
+  function webAnteriorPeriodo() {
+    if (!objetivosCustomDesde || !objetivosCustomHasta) return { facturacion: 0, unidades: 0 };
+    const { desde, hasta } = rangoAnteriorStr(objetivosCustomDesde, objetivosCustomHasta);
+    return sumarPorDiaRango(desde, hasta);
+  }
+
+  const MESES_ES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+  function nombreMesActual() {
+    const now = new Date();
+    return `${MESES_ES[now.getMonth()]} ${now.getFullYear()}`;
+  }
+  function rangoMesActual() {
+    const now = new Date();
+    return `1–${now.getDate()} ${nombreMesActual()}`;
+  }
+  function rangoSemanaActual() {
+    const lunes = mondayOfWeek(new Date());
+    const opts = { day: "numeric", month: "short" };
+    return `${lunes.toLocaleDateString("es-AR", opts)} – hoy`;
+  }
+  function rango7DiasActual() {
+    const hoy = new Date();
+    const hace7 = new Date(hoy); hace7.setDate(hoy.getDate() - 6);
+    const opts = { day: "numeric", month: "short" };
+    return `${hace7.toLocaleDateString("es-AR", opts)} – hoy`;
+  }
+
+  function renderObjetivoCard(nombre, fuente, periodoTexto, actual, objetivo, opts) {
+    opts = opts || {};
+
+    function bloque(label, val, obj) {
+      if (opts.comparacion) {
+        const diff = val - obj;
+        const pctVar = obj > 0 ? (diff / obj) * 100 : (val > 0 ? 100 : 0);
+        const subiendo = pctVar >= 0;
+        return `
+          <div class="flex items-baseline justify-between">
+            <div class="text-lg font-bold">${label === "$" ? fmtMoney(val) : fmtNum(val) + " u."}</div>
+            <div class="text-[11px] text-slate-400">anterior <b class="text-slate-600">${label === "$" ? fmtMoney(obj) : fmtNum(obj) + " u."}</b></div>
+          </div>
+          <div class="flex justify-between text-[11px] mb-2">
+            <span class="font-bold ${subiendo ? "text-green-600" : "text-red-500"}">${subiendo ? "▲" : "▼"} ${Math.abs(pctVar).toFixed(0)}%</span>
+            <span class="text-slate-400">${diff >= 0 ? "+" : ""}${label === "$" ? fmtMoney(diff) : fmtNum(diff) + " u."}</span>
+          </div>`;
+      }
+      const pct = obj > 0 ? Math.min(999, (val / obj) * 100) : (val > 0 ? 100 : 0);
+      const falta = Math.max(0, obj - val);
+      const barColor = pct >= 100 ? "bg-green-500" : pct >= 60 ? "bg-indigo-500" : "bg-red-400";
+      return `
+        <div class="flex items-baseline justify-between">
+          <div class="text-lg font-bold">${label === "$" ? fmtMoney(val) : fmtNum(val) + " u."}</div>
+          <div class="text-[11px] text-slate-400">objetivo <b class="text-slate-600">${label === "$" ? fmtMoney(obj) : fmtNum(obj) + " u."}</b></div>
+        </div>
+        <div class="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden mb-1 mt-1">
+          <div class="h-full ${barColor} rounded-full" style="width:${Math.min(100, pct)}%"></div>
+        </div>
+        <div class="flex justify-between text-[11px] text-slate-400 mb-2">
+          <span><b class="text-slate-600">${pct.toFixed(0)}%</b> del objetivo</span>
+          <span>${falta > 0 ? "faltan " + (label === "$" ? fmtMoney(falta) : fmtNum(falta) + " u.") : "¡cumplido!"}</span>
+        </div>`;
+    }
+
+    return `
+      <div class="card p-5">
+        <div class="flex items-center justify-between mb-1">
+          <div class="font-bold text-sm">${nombre}</div>
+          <div class="text-[11px] text-slate-400">${fuente}</div>
+        </div>
+        <div class="text-[11px] text-slate-400 mb-2">${periodoTexto}</div>
+        <div class="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-0.5">Facturación</div>
+        ${bloque("$", actual.facturacion, objetivo.facturacion)}
+        <div class="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-0.5 pt-1 border-t border-slate-100">Unidades</div>
+        ${bloque("u", actual.unidades, objetivo.unidades)}
+      </div>`;
+  }
+
+  // Categorías reales de prenda — Tiendanube mezcla esto con etiquetas de promo/colección
+  // (Winter Sale, Liquidación, temporadas, etc.) en el mismo campo "categorías" del producto,
+  // así que hay que filtrar a mano contra esta lista para que el panel sirva para planificar.
+  const CATEGORIAS_REALES = [
+    "remeras", "tops", "tejidos", "sweaters", "tejidos | sweaters", "buzos",
+    "capsula importados", "cápsula importados", "gamulanes", "camperas", "gamulanes / camperas", "gamulanes/camperas",
+    "pantalones", "shorts", "pantalones - shorts", "pantalones/shorts", "body", "jeans", "jean",
+    "accesorios", "blazers", "camisas", "blazers / camisas", "blazers/camisas", "vestidos",
+  ];
+  function esCategoriaReal(nombre) {
+    const n = (nombre || "").toLowerCase().trim();
+    return CATEGORIAS_REALES.some(c => n === c || n.includes(c));
+  }
+
+  // Exporta un Excel con la venta del mes en curso, un producto por fila, con su categoría
+  // principal ya corregida (sin el doble conteo de categorías múltiples de Tiendanube) — para
+  // pasarle a Claude un dato completo y real de la web, igual que se hace con el Excel del local.
+  function exportarExcelProductosWeb() {
+    if (!data || !data.productos) { alert("Todavía no cargaron los datos."); return; }
+    const filas = data.productos
+      .filter(p => p.ventasPorPeriodo && p.ventasPorPeriodo.estemes && p.ventasPorPeriodo.estemes.unidades > 0)
+      .map(p => {
+        const v = p.ventasPorPeriodo.estemes;
+        return {
+          Producto: p.producto,
+          Categoría: p.categoria || "Sin categoría",
+          Unidades: v.unidades,
+          Facturación: Math.round(v.facturacion),
+          "Precio Promedio": v.unidades > 0 ? Math.round(v.facturacion / v.unidades) : 0,
+        };
+      })
+      .sort((a, b) => b.Facturación - a.Facturación);
+    if (!filas.length) { alert("No hay ventas cargadas para este mes todavía."); return; }
+    const ws = XLSX.utils.json_to_sheet(filas);
+    ws["!cols"] = [{ wch: 40 }, { wch: 22 }, { wch: 10 }, { wch: 14 }, { wch: 14 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Web por producto");
+    const hoy = new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(wb, `Web_por_producto_${hoy}.xlsx`);
+  }
+  document.getElementById("btnExportarExcelWeb").addEventListener("click", exportarExcelProductosWeb);
+
+  function renderObjetivosCategoria(contId, fuente) {
+    fuente = fuente || "ambas";
+    const cont = document.getElementById(contId || "objetivosCategoriaTabla");
+    if (!cont) return;
+    const catsWeb = fuente === "local" ? [] : ((data.porCategoriaPorPeriodo || {}).estemes || []);
+    const combinado = {};
+    let webNoMatch = { facturacion: 0, unidades: 0 };
+    catsWeb.forEach(c => {
+      if (esCategoriaReal(c.categoria)) {
+        combinado[c.categoria] = combinado[c.categoria] || { web: { facturacion: 0, unidades: 0 }, local: { facturacion: 0, unidades: 0 } };
+        combinado[c.categoria].web.facturacion += c.facturacion;
+        combinado[c.categoria].web.unidades += c.unidades;
+      } else {
+        webNoMatch.facturacion += c.facturacion;
+        webNoMatch.unidades += c.unidades;
+      }
+    });
+    const catsLocal = fuente === "web" ? {} : localCategoriasMesActual();
+    Object.entries(catsLocal).forEach(([cat, v]) => {
+      combinado[cat] = combinado[cat] || { web: { facturacion: 0, unidades: 0 }, local: { facturacion: 0, unidades: 0 } };
+      combinado[cat].local.facturacion += v.facturacion;
+      combinado[cat].local.unidades += v.unidades;
+    });
+
+    const filas = Object.entries(combinado).map(([cat, v]) => {
+      const facturacion = v.web.facturacion + v.local.facturacion;
+      const unidades = v.web.unidades + v.local.unidades;
+      return { categoria: cat, facturacion, unidades, precioProm: unidades > 0 ? facturacion / unidades : 0, sinIdentificar: false };
+    }).sort((a, b) => b.facturacion - a.facturacion);
+    if (webNoMatch.unidades > 0 || webNoMatch.facturacion > 0) {
+      filas.push({ categoria: "⚠️ Web — sin identificar (colecciones/promos u otras categorías)", facturacion: webNoMatch.facturacion, unidades: webNoMatch.unidades, precioProm: webNoMatch.unidades > 0 ? webNoMatch.facturacion / webNoMatch.unidades : 0, sinIdentificar: true });
+    }
+
+    if (!filas.length) {
+      cont.innerHTML = '<div class="text-slate-400 text-sm">No encontré categorías reales en los datos de este mes — puede que los nombres no coincidan con el filtro. Avisame los nombres exactos y lo ajusto.</div>';
+      return;
+    }
+    const totalFact = filas.reduce((s, f) => s + f.facturacion, 0);
+    cont.innerHTML = `<table class="w-full text-sm">
+      <thead><tr class="text-left text-slate-400 text-xs uppercase border-b border-slate-100">
+        <th class="py-2">Categoría</th><th class="py-2 text-right">Unidades</th><th class="py-2 text-right">Facturación</th><th class="py-2 text-right">Precio prom.</th>
+      </tr></thead>
+      <tbody>${filas.map(f => `
+        <tr class="border-b border-slate-50${f.categoria === "Sin categoría" || f.sinIdentificar ? " bg-red-50" : ""}">
+          <td class="py-2 font-semibold${f.categoria === "Sin categoría" || f.sinIdentificar ? " text-red-500" : ""}">${f.categoria}</td>
+          <td class="py-2 text-right">${fmtNum(f.unidades)}</td>
+          <td class="py-2 text-right">${fmtMoney(f.facturacion)}</td>
+          <td class="py-2 text-right">${fmtMoney(f.precioProm)}</td>
+        </tr>`).join("")}
+        <tr class="border-t-2 border-slate-200">
+          <td class="py-2 font-bold">Total</td><td></td>
+          <td class="py-2 text-right font-bold">${fmtMoney(totalFact)}</td><td></td>
+        </tr>
+      </tbody></table>
+      <p class="text-[11px] text-slate-400 mt-2">Web (automático) + Local (categorizado por palabra clave desde tus cargas de Excel). Solo suma semanas del local ya cargadas este mes. Las filas en rojo son plata que no se pudo asignar a ninguna categoría real — avisame qué productos son para ajustar el filtro/las palabras clave.</p>`;
+  }
+
+  function renderObjetivos() {
+    if (!data) return;
+    document.getElementById("objetivosPeriodo").querySelectorAll("button").forEach(b => b.classList.toggle("active", b.dataset.periodo === objetivosPeriodo));
+    document.getElementById("objetivosCustomFechas").classList.toggle("hidden", objetivosPeriodo !== "custom");
+    renderObjetivosCategoria(); // independiente del toggle Mensual/Semanal/Personalizado — siempre mes en curso
+
+    if (objetivosPeriodo === "custom") {
+      if (!objetivosCustomDesde || !objetivosCustomHasta) {
+        document.getElementById("objetivosCards").innerHTML = '<div class="text-slate-400 text-sm p-4 col-span-3">Elegí un rango de fechas arriba y tocá "Aplicar".</div>';
+        return;
+      }
+      const webActual = webActualPeriodo();
+      const webAnt = webAnteriorPeriodo();
+      const localActual = localActualPeriodo();
+      const localAnt = localAnteriorPeriodo();
+      const totalActual = { facturacion: webActual.facturacion + localActual.facturacion, unidades: webActual.unidades + localActual.unidades };
+      const totalAnt = { facturacion: webAnt.facturacion + localAnt.facturacion, unidades: webAnt.unidades + localAnt.unidades };
+      const { desde: antDesde, hasta: antHasta } = rangoAnteriorStr(objetivosCustomDesde, objetivosCustomHasta);
+      const fmtFecha = s => new Date(s + "T00:00:00").toLocaleDateString("es-AR", { day: "numeric", month: "short" });
+
+      document.getElementById("objetivosCards").innerHTML =
+        renderObjetivoCard("Web", "Automático · Tiendanube", `${fmtFecha(objetivosCustomDesde)} – ${fmtFecha(objetivosCustomHasta)} vs. ${fmtFecha(antDesde)} – ${fmtFecha(antHasta)}`, webActual, webAnt, { comparacion: true }) +
+        renderObjetivoCard("Local Avellaneda", "Carga manual", `Semanas en el rango vs. mismo rango anterior`, localActual, localAnt, { comparacion: true }) +
+        renderObjetivoCard("Total", "", `Web + Local, rango elegido vs. anterior`, totalActual, totalAnt, { comparacion: true });
+      return;
+    }
+
+    const webActual = webActualPeriodo();
+    const webObj = objetivoPorPeriodo("web");
+    const localActual = localActualPeriodo();
+    const localObj = objetivoPorPeriodo("local");
+    const totalActual = { facturacion: webActual.facturacion + localActual.facturacion, unidades: webActual.unidades + localActual.unidades };
+    const totalObj = { facturacion: webObj.facturacion + localObj.facturacion, unidades: webObj.unidades + localObj.unidades };
+
+    const periodoWeb = objetivosPeriodo === "mensual" ? `Comparando: ${rangoMesActual()} vs. objetivo mensual` : `Comparando: ${rango7DiasActual()} (últimos 7 días) vs. objetivo semanal`;
+    const periodoLocal = objetivosPeriodo === "mensual" ? `Suma de semanas cargadas de ${nombreMesActual()} vs. objetivo mensual` : `Semana cargada: ${rangoSemanaActual()} (lunes a hoy) vs. objetivo semanal`;
+    const periodoTotal = objetivosPeriodo === "mensual" ? "Web (mes en curso) + Local (semanas cargadas del mes)" : "Web (últimos 7 días corridos) + Local (semana calendario actual)";
+
+    document.getElementById("objetivosCards").innerHTML =
+      renderObjetivoCard("Web", "Automático · Tiendanube", periodoWeb, webActual, webObj) +
+      renderObjetivoCard("Local Avellaneda", "Carga manual", periodoLocal, localActual, localObj) +
+      renderObjetivoCard("Total", "", periodoTotal, totalActual, totalObj);
+  }
+
+  document.getElementById("objetivosPeriodo").addEventListener("click", e => {
+    const btn = e.target.closest("button"); if (!btn) return;
+    objetivosPeriodo = btn.dataset.periodo;
+    if (objetivosPeriodo === "custom" && !objetivosCustomDesde) {
+      const hoy = new Date();
+      const hace7 = new Date(hoy); hace7.setDate(hoy.getDate() - 6);
+      document.getElementById("objetivosCustomDesde").value = hace7.toISOString().slice(0, 10);
+      document.getElementById("objetivosCustomHasta").value = hoy.toISOString().slice(0, 10);
+    }
+    renderObjetivos();
+  });
+  document.getElementById("objetivosCustomAplicar").addEventListener("click", () => {
+    const d = document.getElementById("objetivosCustomDesde").value;
+    const h = document.getElementById("objetivosCustomHasta").value;
+    if (!d || !h || d > h) { alert("Revisá las fechas: 'Desde' tiene que ser antes que 'Hasta'."); return; }
+    objetivosCustomDesde = d; objetivosCustomHasta = h;
+    renderObjetivos();
+  });
+
+  document.getElementById("objetivosLocalGuardar").addEventListener("click", () => {
+    const fact = Number(document.getElementById("objetivosLocalFact").value || 0);
+    const unid = Number(document.getElementById("objetivosLocalUnid").value || 0);
+    const key = semanaCargaKey();
+    db.ref(`dashboard_objetivos/local/semanas/${key}`).update({ facturacion: fact, unidades: unid }).then(() => {
+      const msg = document.getElementById("objetivosLocalGuardadoMsg");
+      msg.textContent = "✓ Guardado";
+      renderSemanaCargaEstado();
+      setTimeout(() => { msg.textContent = ""; }, 2500);
+    });
+  });
+
+  db.ref("dashboard_objetivos/local").on("value", snap => {
+    objetivosLocal = snap.val() || {};
+    if (data) renderObjetivos();
+    if (document.getElementById("objetivosSemanaCarga")) renderSemanaCargaEstado();
+  });
+
+  // Precarga el selector de "qué semana estás cargando" con el lunes de esta semana.
+  { const elSemanaCarga = document.getElementById("objetivosSemanaCarga"); if (elSemanaCarga && !elSemanaCarga.value) elSemanaCarga.value = semanaActualKey(); }
+
+  // ---------------- Objetivos: importar Excel de Ninox ----------------
+  // Orden importa: se evalúa de arriba a abajo y gana la primera que matchea. Usa las mismas
+  // categorías "reales" que el filtro de la tabla de arriba, para que web y local sumen bien.
+  const CATEGORIA_KEYWORDS_LOCAL = [
+    { cat: "Vestidos", kws: ["vestido"] },
+    { cat: "Jeans", kws: ["jean"] },
+    { cat: "Body", kws: ["body"] },
+    { cat: "Blazers / Camisas", kws: ["blazer", "camisa"] },
+    { cat: "Pantalones - Shorts", kws: ["pantalon", "short", "bermuda", "palazzo"] },
+    { cat: "Gamulanes/Camperas", kws: ["campera", "gamulan", "tapado", "piloto", "parka"] },
+    { cat: "Buzos", kws: ["buzo", "hoodie", "canguro"] },
+    { cat: "Tejidos | Sweaters", kws: ["sweater", "tejido", "cardigan", "chaleco"] },
+    { cat: "Tops", kws: ["top ", "musculosa", "corset", "crop"] },
+    { cat: "Remeras", kws: ["remera", "chomba"] },
+    { cat: "Accesorios", kws: ["gorra", "cinturon", "bufanda", "accesorio", "mochila", "cartera"] },
+  ];
+  function categorizarDescripcionLocal(desc) {
+    const n = " " + normalizar(desc) + " ";
+    for (const { cat, kws } of CATEGORIA_KEYWORDS_LOCAL) {
+      if (kws.some(k => n.includes(k))) return cat;
+    }
+    return "Sin categoría";
+  }
+  function parseNumAR(v) {
+    if (typeof v === "number") return v;
+    if (v === null || v === undefined || v === "") return 0;
+    const s = String(v).trim().replace(/\./g, "").replace(",", ".").replace(/[^\d.-]/g, "");
+    const n = parseFloat(s);
+    return isNaN(n) ? 0 : n;
+  }
+  function normalizar(s) {
+    return (s || "").toString().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  }
+
+  let objetivosExcelParseado = null;
+
+  document.getElementById("objetivosExcelInput").addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const wb = XLSX.read(ev.target.result, { type: "array" });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        // El export de Ninox ("Ganancia por Artículos") trae una fila de título arriba del
+        // encabezado real (Código/Descripción/Cantidad/...), así que hay que buscar en qué
+        // fila está el encabezado de verdad antes de armar los objetos.
+        const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+        const headerIdx = raw.findIndex(row => row.some(c => normalizar(c) === "codigo") && row.some(c => normalizar(c).includes("cantidad")));
+        if (headerIdx === -1) throw new Error("No encontré la fila de encabezado (Código/Cantidad). ¿Es el export de \"Ganancia por Artículos\" de Ninox?");
+        const header = raw[headerIdx];
+        const dataRows = raw.slice(headerIdx + 1).filter(row => row.some(c => c !== ""));
+        if (!dataRows.length) throw new Error("No hay filas de datos debajo del encabezado.");
+
+        const idxCant = header.findIndex(h => normalizar(h).includes("cantidad"));
+        const idxVentaTotal = header.findIndex(h => normalizar(h) === "venta total");
+        const idxDesc = header.findIndex(h => normalizar(h).includes("descripcion"));
+        if (idxCant === -1 || idxVentaTotal === -1) throw new Error("No encontré las columnas Cantidad / Venta Total. Revisá el encabezado.");
+
+        let facturacion = 0, unidades = 0;
+        const categorias = {};
+        const articulos = {};
+        dataRows.forEach(r => {
+          const u = parseNumAR(r[idxCant]);
+          const f = parseNumAR(r[idxVentaTotal]);
+          unidades += u;
+          facturacion += f;
+          if (idxDesc !== -1) {
+            const desc = String(r[idxDesc] || "").trim();
+            const cat = categorizarDescripcionLocal(desc);
+            const prev = categorias[cat] || { facturacion: 0, unidades: 0 };
+            prev.facturacion += f; prev.unidades += u;
+            categorias[cat] = prev;
+            if (desc) {
+              const prevA = articulos[desc] || { facturacion: 0, unidades: 0 };
+              prevA.facturacion += f; prevA.unidades += u;
+              articulos[desc] = prevA;
+            }
+          }
+        });
+
+        objetivosExcelParseado = { facturacion, unidades, categorias, articulos };
+        document.getElementById("objetivosExcelPreview").className = "mt-3 border border-slate-200 rounded-lg p-3 bg-slate-50";
+        const fechaSel = new Date(semanaCargaKey() + "T00:00:00");
+        const filasCat = Object.entries(categorias).sort((a, b) => b[1].facturacion - a[1].facturacion);
+        document.getElementById("objetivosExcelPreview").innerHTML = `
+          <div class="text-sm font-bold mb-2">${dataRows.length} artículos leídos · Venta Total ${fmtMoney(facturacion)} · ${fmtNum(unidades)} unid.</div>
+          ${filasCat.length ? `<div class="space-y-0.5 mb-3">${filasCat.map(([cat, v]) => `<div class="flex justify-between text-xs ${cat === "Sin categoría" ? "text-red-500 font-semibold" : "text-slate-600"}"><span>${cat}</span><span>${fmtMoney(v.facturacion)} · ${fmtNum(v.unidades)}u</span></div>`).join("")}</div>` : ""}
+          ${categorias["Sin categoría"] ? '<div class="text-xs text-red-500 mb-2">⚠️ Hay productos que no matchearon ninguna categoría — mandame esas descripciones y agrego la palabra clave.</div>' : ""}
+          <div class="text-xs text-slate-500 mb-3">Se va a guardar con fecha <b>${fechaSel.toLocaleDateString("es-AR", { day: "numeric", month: "short" })}</b> (la que elegiste arriba).</div>
+          <button id="objetivosExcelConfirmar" class="px-4 py-2 text-sm font-semibold bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">Confirmar y guardar</button>
+        `;
+        document.getElementById("objetivosExcelConfirmar").addEventListener("click", () => {
+          const key = semanaCargaKey();
+          db.ref(`dashboard_objetivos/local/semanas/${key}`).update(objetivosExcelParseado).then(() => {
+            document.getElementById("objetivosExcelPreview").innerHTML += '<div class="text-xs text-green-600 font-semibold mt-2">✓ Guardado</div>';
+            renderSemanaCargaEstado();
+          });
+        });
+      } catch (err) {
+        document.getElementById("objetivosExcelPreview").className = "mt-3 text-sm text-red-500";
+        document.getElementById("objetivosExcelPreview").textContent = "Error leyendo el archivo: " + err.message;
+      }
+      e.target.value = "";
+    };
+    reader.readAsArrayBuffer(file);
+  });
+
+  const PERIODOS = [
+    { key: "hoy", label: "Hoy" }, { key: "ayer", label: "Ayer" },
+    { key: "7dias", label: "7 días" }, { key: "15dias", label: "15 días" },
+    { key: "30dias", label: "30 días" }, { key: "estemes", label: "Este mes" },
+    { key: "mesanterior", label: "Mes anterior" },
+  ];
+
+  const fmtNum = (n) => (n === null || n === undefined ? "—" : Math.round(Number(n)).toLocaleString("es-AR"));
+  const fmtMoney = (n) => (n === null || n === undefined ? "—" : "$" + Math.round(Number(n)).toLocaleString("es-AR"));
+  const fmtFecha = (d) => (d ? new Date(d).toLocaleDateString("es-AR") : "—");
+
+  function pillsHtml(containerId, current, onClick) {
+    const el = document.getElementById(containerId);
+    el.innerHTML = PERIODOS.map(p => `<button class="pill ${p.key === current ? "active" : ""}" data-key="${p.key}">${p.label}</button>`).join("");
+    el.querySelectorAll("button").forEach(btn => btn.addEventListener("click", () => onClick(btn.dataset.key)));
+  }
+
+  function categoriasUnicas() {
+    const set = new Set();
+    (data.productos || []).forEach(p => productoCategorias(p).forEach(c => set.add(c)));
+    return Array.from(set).sort();
+  }
+
+  // Devuelve todas las categorías de un producto. Compatible con datos viejos
+  // en Firebase (de antes de guardar el array completo) que solo traían "categoria".
+  function productoCategorias(p) {
+    if (p.categorias && p.categorias.length) return p.categorias;
+    return [p.categoria || "Sin categoría"];
+  }
+  function productoEnCategoria(p, cat) {
+    return productoCategorias(p).includes(cat);
+  }
+
+  function llenarSelectCategorias(id, current) {
+    const sel = document.getElementById(id);
+    const cats = categoriasUnicas();
+    sel.innerHTML = '<option value="">Todas las categorías</option>' + cats.map(c => `<option value="${c}" ${c === current ? "selected" : ""}>${c}</option>`).join("");
+  }
+
+  // ---------------- Navegación ----------------
+  document.querySelectorAll(".navitem").forEach(item => {
+    item.addEventListener("click", () => irAVista(item.dataset.view));
+  });
+  document.addEventListener("click", (e) => {
+    const goto = e.target.closest("[data-goto]");
+    if (goto) irAVista(goto.dataset.goto);
+  });
+  function irAVista(view) {
+    document.querySelectorAll(".navitem").forEach(n => n.classList.toggle("active", n.dataset.view === view));
+    document.querySelectorAll(".view").forEach(v => v.classList.toggle("active", v.dataset.view === view));
+    window.scrollTo(0, 0);
+  }
+
+
+  // ---------------- Clasificación manual de la mercadería (oct 2026) ----------------
+  // Cada producto de Tienda Nube se clasifica a mano (no depende de las categorías de TN):
+  //  - base: categoría de prenda (una sola, obligatoria)
+  //  - grupo: New In / Sale / Básicos / Más vendidos (como mucho uno: no pueden coincidir)
+  //  - tendencias: las que se vayan creando (varias, combinan con cualquier grupo)
+  //  - rechazado: no va al foco
+  // Firebase: dashboard_clasif/items/{productId} y dashboard_clasif/cfg {bases, tendencias}.
+  const CL_GRUPOS = ["New In", "Sale", "Básicos", "Más vendidos"];
+  const CL_BASES_DEF = ["Remera", "Top", "Body", "Buzo", "Campera", "Pantalón", "Short", "Jean", "Pollera", "Vestido", "Conjunto"];
+  let clItems = {}, clCfg = { bases: CL_BASES_DEF, tendencias: [] }, clTab = "asignar", clDraft = {}, clBusca = "";
+  let focoModo = "grupo", focoOcultarSin = false; const focoBaseFiltro = {};
+  db.ref("dashboard_clasif/items").on("value", s => { clItems = s.val() || {}; if (data) { renderClasif(); renderFoco(); } });
+  db.ref("dashboard_clasif/cfg").on("value", s => { const v = s.val() || {}; clCfg = { bases: (v.bases && v.bases.length) ? v.bases : CL_BASES_DEF, tendencias: v.tendencias || [] }; if (data) { renderClasif(); renderFoco(); } });
+  db.ref("dashboard_foco/modo").on("value", s => { if (s.val()) focoModo = s.val(); if (data) renderFoco(); });
+  db.ref("dashboard_foco/ocultarSinStock").on("value", s => { focoOcultarSin = !!s.val(); if (data) renderFoco(); });
+  const clVend = (p, per) => (p.ventasPorPeriodo && p.ventasPorPeriodo[per || focoPeriodo] && p.ventasPorPeriodo[per || focoPeriodo].unidades) || 0;
+  const clDe = p => clItems[p.id] || null;
+  const clProds = () => (data && data.productos || []).filter(p => p.publicado && p.id != null);
+  const clAsignados = () => clProds().filter(p => { const c = clDe(p); return c && c.base && !c.rechazado; });
+  function clParaAsignar() {
+    return clProds().filter(p => { const c = clDe(p); return (p.stockTotal || 0) > 0 && !(c && (c.base || c.rechazado)); })
+      .sort((a, b) => String(b.creado || "").localeCompare(String(a.creado || "")));
+  }
+  // Sugeridos para "Más vendidos": los más vendidos de 30 días con stock (top 20) que no están marcados.
+  function clTopVentas() { return clProds().filter(p => !(clDe(p) || {}).rechazado && (p.stockTotal || 0) > 0 && clVend(p, "30dias") > 0).sort((a, b) => clVend(b, "30dias") - clVend(a, "30dias")).slice(0, 20); }
+  const clDias = iso => iso ? Math.floor((Date.now() - new Date(iso).getTime()) / 86400000) : null;
+  function clEstado(p) { const st = p.stockTotal || 0, v = clVend(p); if (st <= 0) return "sin"; if (v >= 5 && st <= Math.max(10, v)) return "rep"; return ""; }
+
+  function clCard(p) {
+    const c = clDe(p) || {}, d = clDraft[p.id] || (clDraft[p.id] = { base: c.base || "", grupo: c.grupo || "", tendencias: Object.keys(c.tendencias || {}) });
+    const dias = clDias(p.creado), top = clTopVentas().some(x => x.id === p.id);
+    const chip = (on, attrs, txt, extra = "") => `<button class="pill ${on ? "active" : ""}" ${attrs} style="${extra}">${focoEsc(txt)}</button>`;
+    return `<div class="card p-3" style="display:grid;grid-template-columns:88px 1fr;gap:12px">
+      <img src="${p.imagen || ""}" class="w-full aspect-[3/4] object-cover rounded-lg bg-slate-100" onerror="this.style.visibility='hidden'" />
+      <div class="min-w-0">
+        <div class="flex justify-between gap-2 flex-wrap items-start">
+          <div class="min-w-0"><span class="font-bold text-sm">${focoEsc(p.producto)}</span>
+            ${dias != null && dias <= 14 ? `<span class="chip chip-green ml-1">Nuevo · ${dias === 0 ? "hoy" : "hace " + dias + " d"}</span>` : ""}
+            ${(p.stockTotal || 0) <= 0 ? '<span class="chip chip-low ml-1">Sin stock</span>' : ""}</div>
+          <span class="text-xs text-slate-500">${fmtNum(p.stockTotal || 0)} u. · ${fmtNum(clVend(p, "30dias"))} vend. (30 d)</span>
+        </div>
+        <div class="flex flex-wrap gap-1.5 items-center mt-2"><span class="text-[10px] font-bold uppercase tracking-wide text-slate-400 w-20">Categoría</span>${clCfg.bases.map(b => chip(d.base === b, `data-clb="${p.id}" data-v="${focoEsc(b)}"`, b)).join("")}<button class="pill" data-clnb="${p.id}" style="border-style:dashed">+ Nueva categoría</button></div>
+        <div class="flex flex-wrap gap-1.5 items-center mt-1.5"><span class="text-[10px] font-bold uppercase tracking-wide text-slate-400 w-20">Grupo (uno)</span>${CL_GRUPOS.map(g => chip(d.grupo === g, `data-clg="${p.id}" data-v="${g}"`, g)).join("")}${top && d.grupo !== "Más vendidos" ? '<span class="text-[11px] text-amber-700 font-semibold">⭐ sugerido: Más vendidos</span>' : ""}</div>
+        <div class="flex flex-wrap gap-1.5 items-center mt-1.5"><span class="text-[10px] font-bold uppercase tracking-wide text-slate-400 w-20">Tendencias</span>${clCfg.tendencias.map(t => chip(d.tendencias.includes(t), `data-clt="${p.id}" data-v="${focoEsc(t)}"`, t, d.tendencias.includes(t) ? "background:#eef2ff;color:#4338ca;border-color:#4f46e5" : "")).join("")}<button class="pill" data-clnt="${p.id}" style="border-style:dashed">+ Nueva tendencia</button></div>
+        <div class="flex flex-wrap gap-2 mt-3">
+          <button class="pill active" data-clsave="${p.id}">Guardar</button>
+          ${c.rechazado ? `<button class="pill" data-clunrej="${p.id}">Volver a tener en cuenta</button>` : `<button class="pill" data-clrej="${p.id}" style="color:#b91c1c;border-color:#fca5a5">Rechazar · no va al foco</button>`}
+        </div>
+      </div></div>`;
+  }
+  function renderClasif() {
+    const cont = document.getElementById("clasifLista"); if (!cont || !data) return;
+    const pend = clParaAsignar();
+    const badge = document.getElementById("clasifBadge"); if (badge) { badge.textContent = pend.length; badge.style.display = pend.length ? "" : "none"; }
+    const rech = clProds().filter(p => (clDe(p) || {}).rechazado), asig = clAsignados();
+    const tabs = [["asignar", `Para asignar (${pend.length})`], ["clasificados", `Clasificados (${asig.length})`], ["masvend", "Más vendidos"], ["rechazados", `Rechazados (${rech.length})`]];
+    document.getElementById("clasifTabs").innerHTML = tabs.map(([k, l]) => `<button class="pill ${clTab === k ? "active" : ""}" data-clt-tab="${k}">${l}</button>`).join("");
+    const q = clBusca.trim().toLowerCase(), filt = l => q ? l.filter(p => String(p.producto || "").toLowerCase().includes(q)) : l;
+    let html = "";
+    if (clTab === "asignar") html = `<p class="text-xs text-slate-500 mb-3">Productos con stock que todavía no clasificaste, los más nuevos primero. Cuando entra uno nuevo o vuelve a tener stock uno sin clasificar, aparece acá.</p>` + (filt(pend).map(clCard).join("") || '<div class="card p-4 text-sm text-slate-500">No hay productos para asignar. 🎉</div>');
+    else if (clTab === "clasificados") html = filt(asig).sort((a, b) => String(b.creado || "").localeCompare(String(a.creado || ""))).map(clCard).join("") || '<div class="card p-4 text-sm text-slate-500">Todavía no clasificaste productos.</div>';
+    else if (clTab === "rechazados") html = filt(rech).map(clCard).join("") || '<div class="card p-4 text-sm text-slate-500">No hay rechazados.</div>';
+    else {
+      const top = clTopVentas(), topIds = new Set(clProds().filter(p => clVend(p, "30dias") > 0).sort((a, b) => clVend(b, "30dias") - clVend(a, "30dias")).slice(0, 30).map(p => p.id));
+      const sugeridos = top.filter(p => (clDe(p) || {}).grupo !== "Más vendidos");
+      const revisar = clAsignados().filter(p => clDe(p).grupo === "Más vendidos" && !topIds.has(p.id));
+      const fila = (p, btn) => `<div class="flex items-center gap-3 py-2 border-b border-slate-100"><img src="${p.imagen || ""}" class="w-10 h-12 object-cover rounded bg-slate-100" onerror="this.style.visibility='hidden'"/><div class="flex-1 min-w-0"><div class="text-sm font-semibold truncate">${focoEsc(p.producto)}</div><div class="text-xs text-slate-500">${fmtNum(clVend(p, "30dias"))} vend. (30 d) · ${fmtNum(p.stockTotal || 0)} u.${(clDe(p) || {}).grupo ? " · hoy en " + focoEsc(clDe(p).grupo) : (clDe(p) || {}).base ? "" : " · sin clasificar"}</div></div>${btn}</div>`;
+      html = `<div class="card p-4 mb-3"><div class="font-bold text-sm mb-1">Sugeridos para sumar</div><p class="text-xs text-slate-500 mb-2">Los que más vendieron en 30 días y no están en Más vendidos. Si ya tienen otro grupo (New In, Sale, Básicos), lo reemplaza.</p>${sugeridos.map(p => fila(p, (clDe(p) || {}).base ? `<button class="pill" data-clmv="${p.id}">Marcar</button>` : '<span class="text-xs text-slate-400">clasificalo primero</span>')).join("") || '<div class="text-xs text-slate-400">Nada para sugerir.</div>'}</div>
+        <div class="card p-4"><div class="font-bold text-sm mb-1">Para revisar</div><p class="text-xs text-slate-500 mb-2">Están en Más vendidos pero ya no están entre los 30 más vendidos de 30 días.</p>${revisar.map(p => fila(p, `<button class="pill" data-clqmv="${p.id}">Quitar</button>`)).join("") || '<div class="text-xs text-slate-400">Todo en orden.</div>'}</div>`;
+    }
+    cont.innerHTML = html;
+    const set = (pid, fn) => { const d = clDraft[pid]; fn(d); renderClasif(); };
+    cont.querySelectorAll("[data-clb]").forEach(b => b.onclick = () => set(b.dataset.clb, d => d.base = d.base === b.dataset.v ? "" : b.dataset.v));
+    cont.querySelectorAll("[data-clg]").forEach(b => b.onclick = () => set(b.dataset.clg, d => d.grupo = d.grupo === b.dataset.v ? "" : b.dataset.v));
+    cont.querySelectorAll("[data-clt]").forEach(b => b.onclick = () => set(b.dataset.clt, d => { const i = d.tendencias.indexOf(b.dataset.v); i >= 0 ? d.tendencias.splice(i, 1) : d.tendencias.push(b.dataset.v); }));
+    cont.querySelectorAll("[data-clnt]").forEach(b => b.onclick = () => { const n = (prompt("Nombre de la tendencia nueva (ej. Lunares):") || "").trim(); if (!n) return;
+      if (!clCfg.tendencias.some(t => t.toLowerCase() === n.toLowerCase())) db.ref("dashboard_clasif/cfg/tendencias").set([...clCfg.tendencias, n]);
+      const d = clDraft[b.dataset.clnt]; const ex = clCfg.tendencias.find(t => t.toLowerCase() === n.toLowerCase()) || n; if (!d.tendencias.includes(ex)) d.tendencias.push(ex); renderClasif(); });
+    cont.querySelectorAll("[data-clnb]").forEach(b => b.onclick = () => { const n = (prompt("Nombre de la categoría nueva (ej. Musculosa):") || "").trim(); if (!n) return;
+      const ex = clCfg.bases.find(x => x.toLowerCase() === n.toLowerCase());
+      if (!ex) db.ref("dashboard_clasif/cfg/bases").set([...clCfg.bases, n]);
+      clDraft[b.dataset.clnb].base = ex || n; renderClasif(); });
+    cont.querySelectorAll("[data-clsave]").forEach(b => b.onclick = () => { const pid = b.dataset.clsave, d = clDraft[pid];
+      if (!d.base) { alert("Elegí la categoría"); return; }
+      const t = {}; d.tendencias.forEach(x => t[x] = true);
+      db.ref("dashboard_clasif/items/" + pid).update({ base: d.base, grupo: d.grupo || null, tendencias: Object.keys(t).length ? t : null, rechazado: null, ts: Date.now() });
+      delete clDraft[pid]; });
+    cont.querySelectorAll("[data-clrej]").forEach(b => b.onclick = () => { db.ref("dashboard_clasif/items/" + b.dataset.clrej).update({ rechazado: true, ts: Date.now() }); delete clDraft[b.dataset.clrej]; });
+    cont.querySelectorAll("[data-clunrej]").forEach(b => b.onclick = () => { db.ref("dashboard_clasif/items/" + b.dataset.clunrej + "/rechazado").remove(); delete clDraft[b.dataset.clunrej]; });
+    cont.querySelectorAll("[data-clmv]").forEach(b => b.onclick = () => { db.ref("dashboard_clasif/items/" + b.dataset.clmv + "/grupo").set("Más vendidos"); delete clDraft[b.dataset.clmv]; });
+    cont.querySelectorAll("[data-clqmv]").forEach(b => b.onclick = () => { db.ref("dashboard_clasif/items/" + b.dataset.clqmv + "/grupo").remove(); delete clDraft[b.dataset.clqmv]; });
+    document.querySelectorAll("[data-clt-tab]").forEach(b => b.onclick = () => { clTab = b.dataset.cltTab; renderClasif(); });
+  }
+  document.getElementById("clasifBusca").addEventListener("input", e => { clBusca = e.target.value; renderClasif(); });
+
+  // Foco con la clasificación propia: por grupo, por tendencia o por categoría base.
+  function renderFocoClasif() {
+    const cont = document.getElementById("focoLista");
+    let secciones;
+    if (focoModo === "grupo") secciones = CL_GRUPOS.map(g => [g, p => clDe(p).grupo === g]);
+    else if (focoModo === "tendencia") secciones = clCfg.tendencias.map(t => [t, p => !!(clDe(p).tendencias || {})[t]]);
+    else secciones = clCfg.bases.map(b => [b, p => clDe(p).base === b]);
+    const asig = clAsignados();
+    const pend = clParaAsignar().length;
+    const aviso = pend ? `<button class="card p-3 w-full text-left text-sm" data-goto="clasificar" style="border-color:#fcd34d;background:#fffbeb">🏷️ <b>${pend} producto${pend > 1 ? "s" : ""} para asignar</b> — tocá para clasificarlos</button>` : "";
+    if (!secciones.length) { cont.innerHTML = aviso + '<div class="card p-4 text-sm text-slate-500">Todavía no hay tendencias creadas. Se crean desde Clasificar.</div>'; return; }
+    cont.innerHTML = aviso + secciones.map(([nom, fn]) => {
+      let ps = asig.filter(fn);
+      const total = ps.length, sinN = ps.filter(p => (p.stockTotal || 0) <= 0).length;
+      const stockTot = ps.reduce((s, p) => s + (p.stockTotal || 0), 0), vendTot = ps.reduce((s, p) => s + clVend(p), 0);
+      const basesHay = focoModo === "categoria" ? [] : clCfg.bases.filter(b => ps.some(p => clDe(p).base === b));
+      const bf = focoBaseFiltro[nom] || "";
+      if (bf) ps = ps.filter(p => clDe(p).base === bf);
+      if (focoOcultarSin) ps = ps.filter(p => (p.stockTotal || 0) > 0);
+      ps.sort((a, b) => ((b.stockTotal || 0) > 0) - ((a.stockTotal || 0) > 0) || clVend(b) - clVend(a) || (b.stockTotal || 0) - (a.stockTotal || 0));
+      const card = p => { const e = clEstado(p);
+        const cls = e === "sin" ? "border-red-300 bg-red-50" : e === "rep" ? "border-amber-300 bg-amber-50" : "border-slate-200";
+        return `<div class="border ${cls} rounded-xl p-2 flex flex-col relative">
+          ${e === "sin" ? '<span class="chip absolute" style="top:12px;left:12px;background:#dc2626;color:#fff">Sin stock</span>' : e === "rep" ? '<span class="chip absolute" style="top:12px;left:12px;background:#f59e0b;color:#fff">Reponer</span>' : ""}
+          <img src="${p.imagen || ""}" class="w-full aspect-[3/4] object-cover rounded-lg bg-slate-100 mb-2" onerror="this.style.visibility='hidden'" />
+          <div class="text-xs font-semibold leading-tight mb-1" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${focoEsc(p.producto)}</div>
+          <div class="text-xs text-slate-600 mt-auto"><b>${fmtNum(p.stockTotal || 0)}</b> u. · ${fmtNum(clVend(p))} vend.</div></div>`; };
+      return `<div class="card p-4"><div class="flex justify-between items-baseline mb-2 flex-wrap gap-2"><div class="font-bold">${focoEsc(nom.toUpperCase())}</div><div class="text-xs text-slate-500">${total} producto${total !== 1 ? "s" : ""} · ${fmtNum(stockTot)} u. · ${fmtNum(vendTot)} vendidas${sinN ? ` · <b style="color:#b91c1c">${sinN} sin stock</b>` : ""}</div></div>
+        ${basesHay.length > 1 ? `<div class="flex flex-wrap gap-1.5 mb-3"><button class="pill ${!bf ? "active" : ""}" data-fbf="${focoEsc(nom)}" data-v="">Todas</button>${basesHay.map(b => `<button class="pill ${bf === b ? "active" : ""}" data-fbf="${focoEsc(nom)}" data-v="${focoEsc(b)}">${focoEsc(b)}</button>`).join("")}</div>` : ""}
+        <div class="grid grid-cols-3 md:grid-cols-6 gap-2">${ps.map(card).join("") || '<div class="text-xs text-slate-400 col-span-3">Sin productos.</div>'}</div></div>`;
+    }).join("");
+    cont.querySelectorAll("[data-fbf]").forEach(b => b.onclick = () => { focoBaseFiltro[b.dataset.fbf] = b.dataset.v; renderFoco(); });
+  }
+
+  // ---------------- Foco: 6 categorías × (6 con más stock, 6 más vendidos) ----------------
+  // Las categorías elegidas se guardan en Firebase (dashboard_foco) para verlas igual en cualquier dispositivo.
+  let focoCats = [], focoPeriodo = "30dias", focoAgregando = false;
+  const FOCO_PERIODOS = [["7dias","7 días"],["15dias","15 días"],["30dias","30 días"],["45dias","45 días"],["60dias","60 días"]];
+  db.ref("dashboard_foco").on("value", snap => { const v = snap.val() || {}; focoCats = (v.categorias || []).filter(Boolean); if (v.periodo) focoPeriodo = v.periodo; if (data) renderFoco(); });
+  function focoGuardar() { db.ref("dashboard_foco").update({ categorias: focoCats, periodo: focoPeriodo }); }
+  const focoEsc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const FOCO_MODOS = [["grupo", "Grupo"], ["tendencia", "Tendencia"], ["categoria", "Categoría"], ["tn", "Tienda Nube (anterior)"]];
+  function renderFoco() {
+    if (!document.getElementById("focoLista") || !data) return;
+    document.getElementById("focoPeriodo").innerHTML = FOCO_PERIODOS.map(([k, l]) => `<button class="pill ${focoPeriodo === k ? "active" : ""}" data-fp="${k}">${l}</button>`).join("");
+    document.getElementById("focoModoBar").innerHTML = `<span class="text-xs text-slate-500 font-medium">Ver por:</span>${FOCO_MODOS.map(([k, l]) => `<button class="pill ${focoModo === k ? "active" : ""}" data-fmodo="${k}">${l}</button>`).join("")}`
+      + (focoModo !== "tn" ? `<label class="text-xs text-slate-600 flex items-center gap-1 ml-2"><input type="checkbox" id="focoOcSin" ${focoOcultarSin ? "checked" : ""}> Ocultar sin stock</label>` : "");
+    document.querySelectorAll("[data-fmodo]").forEach(b => b.onclick = () => { focoModo = b.dataset.fmodo; db.ref("dashboard_foco/modo").set(focoModo); renderFoco(); });
+    const oc = document.getElementById("focoOcSin"); if (oc) oc.onchange = () => { focoOcultarSin = oc.checked; db.ref("dashboard_foco/ocultarSinStock").set(focoOcultarSin); renderFoco(); };
+    document.getElementById("focoCats").style.display = focoModo === "tn" ? "" : "none";
+    document.getElementById("focoLeyenda").textContent = focoModo === "tn"
+      ? "En rojo: mucho stock y casi sin ventas en el período (para empujar). En naranja: se vende y queda poco (para reponer)."
+      : "Sin stock: en rojo. Reponer (se vende y queda poco): en naranja. Los productos sin clasificar o rechazados no aparecen acá.";
+    if (focoModo !== "tn") {
+      document.querySelectorAll("[data-fp]").forEach(b => b.onclick = () => { focoPeriodo = b.dataset.fp; focoGuardar(); renderFoco(); });
+      renderFocoClasif(); return;
+    }
+    renderFocoTN();
+  }
+  function renderFocoTN() {
+    const sinDato = !(data.productos || []).some(p => p.ventasPorPeriodo && p.ventasPorPeriodo[focoPeriodo]);
+    document.getElementById("focoPeriodo").innerHTML = FOCO_PERIODOS.map(([k, l]) => `<button class="pill ${focoPeriodo === k ? "active" : ""}" data-fp="${k}">${l}</button>`).join("");
+    const todas = categoriasUnicas();
+    document.getElementById("focoCats").innerHTML = focoCats.map((c, i) => `<span class="pill active" style="display:inline-flex;align-items:center;gap:4px">${i > 0 ? `<span data-fl="${i}" title="Mover antes" style="cursor:pointer;opacity:.8">◀</span>` : ""}${focoEsc(c)}${i < focoCats.length - 1 ? `<span data-fr="${i}" title="Mover después" style="cursor:pointer;opacity:.8">▶</span>` : ""}<span data-fq="${i}" title="Quitar" style="cursor:pointer;margin-left:4px">✕</span></span>`).join("")
+      + (focoAgregando
+        ? `<select id="focoAdd" class="border border-slate-200 rounded-lg px-3 py-1.5 text-sm"><option value="">Elegí una categoría…</option>${todas.filter(c => !focoCats.includes(c)).map(c => `<option value="${focoEsc(c)}">${focoEsc(c)}</option>`).join("")}</select>`
+        : `<button class="pill" id="focoMas">+ Agregar categoría</button>`);
+    const vend = p => (p.ventasPorPeriodo && p.ventasPorPeriodo[focoPeriodo] && p.ventasPorPeriodo[focoPeriodo].unidades) || 0;
+    const prods = (data.productos || []).filter(p => p.publicado);
+    const fila = (p, modo) => {
+      const v = vend(p), st = p.stockTotal || 0;
+      const empujar = st >= 20 && v <= 2, reponer = v >= 5 && st <= Math.max(10, v);
+      const marca = empujar ? "border-red-300 bg-red-50" : reponer ? "border-amber-300 bg-amber-50" : "border-slate-200";
+      return `<div class="border ${marca} rounded-xl p-2 flex flex-col">
+        <img src="${p.imagen || ""}" class="w-full aspect-[3/4] object-cover rounded-lg bg-slate-100 mb-2" onerror="this.style.visibility='hidden'" />
+        <div class="text-xs font-semibold leading-tight mb-1" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${focoEsc(p.producto)}</div>
+        <div class="text-xs text-slate-600 mt-auto">${modo === "stock" ? `<b>${fmtNum(st)}</b> u. · ${fmtNum(v)} vend.` : `<b>${fmtNum(v)}</b> vend. · ${fmtNum(st)} u.`}</div></div>`;
+    };
+    document.getElementById("focoLista").innerHTML = sinDato
+      ? `<div class="card p-4 text-sm text-slate-500">Todavía no hay datos de ventas para ${FOCO_PERIODOS.find(x => x[0] === focoPeriodo)[1]}. Se completan en la próxima actualización automática (cada hora).</div>`
+      : (focoCats.length ? focoCats.map(cat => {
+        const ps = prods.filter(p => productoEnCategoria(p, cat));
+        const stockTot = ps.reduce((s, p) => s + (p.stockTotal || 0), 0), vendTot = ps.reduce((s, p) => s + vend(p), 0);
+        const masStock = [...ps].sort((a, b) => (b.stockTotal || 0) - (a.stockTotal || 0)).slice(0, 6);
+        const masVend = [...ps].filter(p => vend(p) > 0).sort((a, b) => vend(b) - vend(a)).slice(0, 6);
+        return `<div class="card p-4"><div class="flex justify-between items-baseline mb-3"><div class="font-bold">${focoEsc(cat)}</div><div class="text-xs text-slate-500">${fmtNum(stockTot)} u. en stock · ${fmtNum(vendTot)} vendidas</div></div>
+          <div class="text-xs font-semibold text-slate-500 mb-2">Más stock</div><div class="grid grid-cols-3 md:grid-cols-6 gap-2 mb-4">${masStock.map(p => fila(p, "stock")).join("") || '<div class="text-xs text-slate-400">Sin productos.</div>'}</div>
+          <div class="text-xs font-semibold text-slate-500 mb-2">Más vendidos</div><div class="grid grid-cols-3 md:grid-cols-6 gap-2">${masVend.map(p => fila(p, "vend")).join("") || '<div class="text-xs text-slate-400">Sin ventas en el período.</div>'}</div></div>`;
+      }).join("") : '<div class="card p-4 text-sm text-slate-500">Elegí las categorías arriba.</div>');
+    document.querySelectorAll("[data-fp]").forEach(b => b.onclick = () => { focoPeriodo = b.dataset.fp; focoGuardar(); renderFoco(); });
+    document.querySelectorAll("[data-fq]").forEach(b => b.onclick = () => { focoCats.splice(Number(b.dataset.fq), 1); focoGuardar(); renderFoco(); });
+    const mover = (i, d) => { const j = i + d; if (j < 0 || j >= focoCats.length) return; [focoCats[i], focoCats[j]] = [focoCats[j], focoCats[i]]; focoGuardar(); renderFoco(); };
+    document.querySelectorAll("[data-fl]").forEach(b => b.onclick = () => mover(Number(b.dataset.fl), -1));
+    document.querySelectorAll("[data-fr]").forEach(b => b.onclick = () => mover(Number(b.dataset.fr), 1));
+    const mas = document.getElementById("focoMas"); if (mas) mas.onclick = () => { focoAgregando = true; renderFoco(); };
+    const add = document.getElementById("focoAdd"); if (add) { add.focus(); add.onchange = () => { if (add.value) { focoCats.push(add.value); focoGuardar(); } focoAgregando = false; renderFoco(); }; }
+  }
+
+  // ---------------- Dashboard ----------------
+  function renderDashboard() {
+    pillsHtml("pillsPeriodoDash", periodoDash, (k) => { periodoDash = k; renderDashboard(); });
+
+    const kpis = (data.kpisPorPeriodo || {})[periodoDash] || {};
+    document.getElementById("kFacturacion").textContent = fmtMoney(kpis.facturacionTotal);
+    document.getElementById("kPedidos").textContent = fmtNum(kpis.pedidos);
+    document.getElementById("kTicket").textContent = fmtMoney(kpis.ticketPromedio);
+    document.getElementById("kUnidades").textContent = fmtNum(kpis.unidadesVendidas);
+
+    function delta(id, actual, anterior) {
+      const el = document.getElementById(id);
+      if (!anterior) { el.textContent = ""; return; }
+      const pct = ((actual - anterior) / anterior) * 100;
+      const up = pct >= 0;
+      el.textContent = `${up ? "▲" : "▼"} ${Math.abs(pct).toFixed(0)}% vs anterior`;
+      el.className = "text-xs mt-1 font-semibold " + (up ? "text-green-600" : "text-red-500");
+    }
+    delta("kFacturacionDelta", kpis.facturacionTotal, kpis.facturacionAnterior);
+    delta("kPedidosDelta", kpis.pedidos, kpis.pedidosAnterior);
+
+    const productos = data.productos || [];
+    const top = [...productos].sort((a, b) => (b.ventasPorPeriodo[periodoDash]?.unidades || 0) - (a.ventasPorPeriodo[periodoDash]?.unidades || 0)).slice(0, 5);
+    document.getElementById("miniMasVendidos").innerHTML = top.map((p, i) => `
+      <div class="flex justify-between gap-2"><span class="text-slate-400 w-4">${i + 1}</span><span class="flex-1 truncate">${p.producto}</span><span class="font-bold text-indigo-600">${fmtNum(p.ventasPorPeriodo[periodoDash]?.unidades)} u.</span></div>`).join("") || '<div class="text-slate-400 text-sm">Sin datos.</div>';
+
+    const bajos = productos.filter(p => p.variantes.some(v => v.stock > 0 && v.stock <= 8)).slice(0, 5);
+    document.getElementById("miniUltimas").innerHTML = bajos.map(p => `
+      <div class="flex justify-between gap-2"><span class="flex-1 truncate">${p.producto}</span><span class="font-bold text-amber-600">${fmtNum(p.stockTotal)} u.</span></div>`).join("") || '<div class="text-slate-400 text-sm">Sin alertas.</div>';
+
+    const sinV = productos.filter(p => (p.ventasPorPeriodo[periodoDash]?.unidades || 0) === 0 && p.stockTotal > 0).slice(0, 5);
+    document.getElementById("miniSinVentas").innerHTML = sinV.map(p => `
+      <div class="flex justify-between gap-2"><span class="flex-1 truncate">${p.producto}</span><span class="text-slate-400 text-xs">${fmtFecha(p.ventasTotales.ultimaVenta)}</span></div>`).join("") || '<div class="text-slate-400 text-sm">Todo con ventas.</div>';
+
+    const cats = (data.porCategoriaPorPeriodo || {})[periodoDash] || [];
+    document.getElementById("miniCategorias").innerHTML = cats.slice(0, 6).map((c, i) => `
+      <div class="flex justify-between gap-2"><span class="text-slate-400 w-4">${i + 1}</span><span class="flex-1 truncate">${c.categoria}</span><span class="font-bold text-indigo-600">${fmtNum(c.unidades)} u.</span></div>`).join("") || '<div class="text-slate-400 text-sm">Sin datos.</div>';
+
+    if (cats.length) {
+      document.getElementById("kCategoriaTop").textContent = cats[0].categoria;
+      document.getElementById("kCategoriaTopSub").textContent = `${fmtNum(cats[0].unidades)} u. · ${fmtMoney(cats[0].facturacion)}`;
+    } else {
+      document.getElementById("kCategoriaTop").textContent = "—";
+      document.getElementById("kCategoriaTopSub").textContent = "";
+    }
+
+    const talles = (data.porTallePorPeriodo || {})[periodoDash] || [];
+    document.getElementById("miniTalles").innerHTML = talles.slice(0, 6).map((t, i) => `
+      <div class="flex justify-between gap-2"><span class="text-slate-400 w-4">${i + 1}</span><span class="flex-1 truncate">${t.talle}</span><span class="font-bold text-indigo-600">${fmtNum(t.unidades)} u.</span></div>`).join("") || '<div class="text-slate-400 text-sm">Sin datos.</div>';
+
+    const tags = (data.porTagPorPeriodo || {})[periodoDash] || [];
+    document.getElementById("miniTags").innerHTML = tags.slice(0, 6).map((t, i) => `
+      <div class="flex justify-between gap-2"><span class="text-slate-400 w-4">${i + 1}</span><span class="flex-1 truncate">${t.tag}</span><span class="font-bold text-indigo-600">${fmtNum(t.unidades)} u.</span></div>`).join("") || '<div class="text-slate-400 text-sm">Sin tags cargados en los productos.</div>';
+  }
+
+  // ---------------- Stock general ----------------
+  function renderStock() {
+    llenarSelectCategorias("stockCategoria", stockCategoria);
+    let productos = [...(data.productos || [])];
+    if (!stockOcultos) productos = productos.filter(p => p.publicado);
+    if (stockCategoria) productos = productos.filter(p => productoEnCategoria(p, stockCategoria));
+    if (stockBuscar.trim()) { const q = stockBuscar.trim().toLowerCase(); productos = productos.filter(p => p.producto.toLowerCase().includes(q)); }
+    if (stockMin !== null) productos = productos.filter(p => p.stockTotal >= stockMin);
+    if (stockMax !== null) productos = productos.filter(p => p.stockTotal <= stockMax);
+
+    const sorters = {
+      nombre: (a, b) => a.producto.localeCompare(b.producto, "es"),
+      mayorStock: (a, b) => b.stockTotal - a.stockTotal,
+      menorStock: (a, b) => a.stockTotal - b.stockTotal,
+      mayorValor: (a, b) => (b.stockValorTotal || 0) - (a.stockValorTotal || 0),
+      masVendidos: (a, b) => b.ventasTotales.unidades - a.ventasTotales.unidades,
+      masRecientes: (a, b) => new Date(b.creado || 0) - new Date(a.creado || 0),
+      masAntiguos: (a, b) => new Date(a.creado || 0) - new Date(b.creado || 0),
+    };
+    productos.sort(sorters[stockOrden] || sorters.nombre);
+
+    document.getElementById("stockCount").textContent = `${productos.length} productos · stock actual por color y talle`;
+
+    document.getElementById("stockLista").innerHTML = productos.slice(0, 150).map((p, idx) => {
+      const chips = p.stockPorColor.slice(0, 4).map(c => `<span class="chip ${c.stock <= 0 ? "chip-low" : "chip-ok"}">${c.color}: ${c.stock}</span>`).join(" ");
+      const extra = p.stockPorColor.length > 4 ? `<span class="text-xs text-slate-400">+${p.stockPorColor.length - 4} colores</span>` : "";
+      const valorLine = stockOrden === "mayorValor" ? `<div class="text-xs text-slate-500 font-semibold mt-0.5">Valor en stock: ${fmtMoney(p.stockValorTotal)}</div>` : "";
+      return `
+      <div class="card p-4 flex items-center gap-4">
+        <img src="${p.imagen || ""}" class="w-24 h-28 object-cover rounded-lg bg-slate-100 flex-shrink-0" onerror="this.style.visibility='hidden'" />
+        <div class="flex-1 min-w-0">
+          <div class="font-bold text-sm mb-1.5">${p.producto}</div>
+          <div class="flex flex-wrap gap-1.5 items-center">${chips}${extra}</div>
+          <div class="text-xs text-indigo-500 font-semibold mt-1.5">${fmtNum(p.ventasTotales.unidades)} vendidos en total</div>
+          ${valorLine}
+        </div>
+        <div class="text-right flex-shrink-0">
+          <div class="text-xl font-bold">${fmtNum(p.stockTotal)}</div>
+          <div class="text-xs text-slate-400">unid.</div>
+        </div>
+      </div>`;
+    }).join("") || '<div class="text-slate-400 text-sm p-4">No se encontraron productos.</div>';
+  }
+
+  // ---------------- Últimas unidades ----------------
+  function diasHastaAgotarse(p, periodo) {
+    const dias = (data.periodosDias || {})[periodo] || 30;
+    const vendidas = p.ventasPorPeriodo[periodo]?.unidades || 0;
+    if (vendidas === 0) return Infinity;
+    const ritmo = vendidas / dias;
+    return p.stockTotal / ritmo;
+  }
+
+  function renderUltimas() {
+    pillsHtml("pillsPeriodoUltimas", periodoUltimas, (k) => { periodoUltimas = k; renderUltimas(); });
+    llenarSelectCategorias("ultimasCategoria", ultimasCategoria);
+
+    let productos = [...(data.productos || [])].filter(p => p.stockTotal > 0);
+    if (ultimasCategoria) productos = productos.filter(p => productoEnCategoria(p, ultimasCategoria));
+    if (ultimasBuscar.trim()) { const q = ultimasBuscar.trim().toLowerCase(); productos = productos.filter(p => p.producto.toLowerCase().includes(q)); }
+
+    productos = productos.map(p => ({ p, dias: diasHastaAgotarse(p, periodoUltimas), vendidas: p.ventasPorPeriodo[periodoUltimas]?.unidades || 0 }))
+      .filter(x => x.vendidas > 0);
+
+    if (ultimasRapido) productos = productos.filter(x => x.dias <= 30);
+    productos.sort((a, b) => a.dias - b.dias);
+
+    document.getElementById("ultimasLista").innerHTML = productos.slice(0, 100).map(({ p, dias, vendidas }) => {
+      const diasDelPeriodo = (data.periodosDias || {})[periodoUltimas] || 30;
+      const ritmo = (vendidas / diasDelPeriodo).toFixed(1);
+      const v = p.ventasPorPeriodo[periodoUltimas];
+      const colorTop = v?.colorMasVendido ? `· repone <b>${v.colorMasVendido.color}</b> (${fmtNum(v.colorMasVendido.unidades)} vendidas)` : "";
+      return `
+      <div class="card p-4 flex items-center gap-4 ${dias <= 15 ? "border-amber-300" : ""}">
+        <img src="${p.imagen || ""}" class="w-14 h-16 object-cover rounded-lg bg-slate-100 flex-shrink-0" onerror="this.style.visibility='hidden'" />
+        <div class="flex-1 min-w-0">
+          <div class="font-bold text-sm mb-1">${p.producto}</div>
+          <div class="text-xs text-slate-500"><b>${fmtNum(p.stockTotal)}</b> stock · <b>${fmtNum(vendidas)}</b> vendidas · ${ritmo}/día ${colorTop}</div>
+          <div class="mt-1"><span class="chip chip-amber">~${Math.round(dias)} días</span></div>
+        </div>
+      </div>`;
+    }).join("") || '<div class="text-slate-400 text-sm p-4">Sin productos que se estén por agotar en este período.</div>';
+  }
+
+  // ---------------- Productos vendidos ----------------
+  function renderVendidos() {
+    pillsHtml("pillsPeriodoVendidos", periodoVendidos, (k) => { periodoVendidos = k; renderVendidos(); });
+    llenarSelectCategorias("vendidosCategoria", vendidosCategoria);
+
+    let productos = [...(data.productos || [])];
+    if (vendidosCategoria) productos = productos.filter(p => productoEnCategoria(p, vendidosCategoria));
+    if (vendidosBuscar.trim()) { const q = vendidosBuscar.trim().toLowerCase(); productos = productos.filter(p => p.producto.toLowerCase().includes(q)); }
+
+    productos = productos.filter(p => (p.ventasPorPeriodo[periodoVendidos]?.unidades || 0) > 0);
+    productos.sort((a, b) => (b.ventasPorPeriodo[periodoVendidos]?.[vendidosCriterio] || 0) - (a.ventasPorPeriodo[periodoVendidos]?.[vendidosCriterio] || 0));
+
+    document.getElementById("vendidosCount").textContent = `${productos.length} productos con ventas`;
+
+    renderGanadores(productos);
+
+    if (vendidosVista === "conVariantes") renderVendidosConVariantes(productos);
+    else renderVendidosSinVariantes(productos);
+  }
+
+  function renderVendidosSinVariantes(productos) {
+    document.getElementById("vendidosTablaHead").innerHTML = `
+      <tr class="text-left text-slate-400 text-xs uppercase border-b border-slate-100 bg-slate-50">
+        <th class="py-2.5 px-4">#</th>
+        <th class="py-2.5 px-4">Producto</th>
+        <th class="py-2.5 px-4">Color que más sale</th>
+        <th class="py-2.5 px-4 text-right">Unidades</th>
+        <th class="py-2.5 px-4 text-right">Pedidos</th>
+        <th class="py-2.5 px-4 text-right">Última venta</th>
+      </tr>`;
+
+    document.getElementById("vendidosTabla").innerHTML = productos.slice(0, 100).map((p, i) => {
+      const v = p.ventasPorPeriodo[periodoVendidos];
+      const colorTop = v.colorMasVendido ? `${v.colorMasVendido.color} (${fmtNum(v.colorMasVendido.unidades)} u.)` : "—";
+      return `
+      <tr class="border-b border-slate-50">
+        <td class="py-2.5 px-4 text-slate-400">${i + 1}</td>
+        <td class="py-2.5 px-4 font-semibold text-indigo-700 hover:underline cursor-pointer" onclick="abrirReposicion('${p.id}')">${p.producto}</td>
+        <td class="py-2.5 px-4 text-slate-500">${colorTop}</td>
+        <td class="py-2.5 px-4 text-right font-bold text-indigo-600">${vendidosCriterio === "facturacion" ? fmtMoney(v.facturacion) : fmtNum(v.unidades)}</td>
+        <td class="py-2.5 px-4 text-right">${fmtNum(v.pedidos)}</td>
+        <td class="py-2.5 px-4 text-right text-slate-400">${fmtFecha(p.ventasTotales.ultimaVenta)}</td>
+      </tr>`;
+    }).join("") || '<tr><td colspan="6" class="text-center text-slate-400 py-6">Sin ventas en este período.</td></tr>';
+  }
+
+  // "Con variantes": desglosa cada producto en sus combinaciones color/talle
+  // vendidas en el período, ordenadas dentro de cada producto por el criterio elegido.
+  function renderVendidosConVariantes(productos) {
+    document.getElementById("vendidosTablaHead").innerHTML = `
+      <tr class="text-left text-slate-400 text-xs uppercase border-b border-slate-100 bg-slate-50">
+        <th class="py-2.5 px-4">#</th>
+        <th class="py-2.5 px-4">Producto</th>
+        <th class="py-2.5 px-4">Color</th>
+        <th class="py-2.5 px-4">Talle</th>
+        <th class="py-2.5 px-4 text-right">Unidades</th>
+        <th class="py-2.5 px-4 text-right">Facturación</th>
+      </tr>`;
+
+    let filas = [];
+    productos.slice(0, 100).forEach((p) => {
+      const v = p.ventasPorPeriodo[periodoVendidos];
+      const variantes = (v.variantesVendidas && v.variantesVendidas.length)
+        ? [...v.variantesVendidas].sort((a, b) => (b[vendidosCriterio] || 0) - (a[vendidosCriterio] || 0))
+        : [{ color: v.colorMasVendido?.color || "—", talle: "—", unidades: v.unidades, facturacion: v.facturacion }];
+      variantes.forEach((vari, idx) => {
+        filas.push({ id: p.id, producto: p.producto, primero: idx === 0, cantVariantes: variantes.length, vari });
+      });
+    });
+
+    document.getElementById("vendidosTabla").innerHTML = filas.map((f, i) => `
+      <tr class="border-b border-slate-50 ${f.primero ? "" : "bg-slate-50/40"}">
+        <td class="py-2 px-4 text-slate-400">${f.primero ? "" : ""}</td>
+        <td class="py-2 px-4 ${f.primero ? "font-semibold text-indigo-700 hover:underline cursor-pointer" : "text-slate-400 pl-6"}" ${f.primero ? `onclick="abrirReposicion('${f.id}')"` : ""}>${f.primero ? f.producto : "↳"}</td>
+        <td class="py-2 px-4 text-slate-600">${f.vari.color || "—"}</td>
+        <td class="py-2 px-4 text-slate-600">${f.vari.talle || "—"}</td>
+        <td class="py-2 px-4 text-right font-bold text-indigo-600">${fmtNum(f.vari.unidades)}</td>
+        <td class="py-2 px-4 text-right text-slate-500">${fmtMoney(f.vari.facturacion)}</td>
+      </tr>`).join("") || '<tr><td colspan="6" class="text-center text-slate-400 py-6">Sin ventas en este período.</td></tr>';
+  }
+
+  // ---------------- Reposición por variante (color/talle) ----------------
+  function diasParaPeriodo(periodo) {
+    return (data.periodosDias && data.periodosDias[periodo]) || 30;
+  }
+
+  function stockPorVariante(p) {
+    const map = new Map();
+    (p.variantes || []).forEach(v => {
+      const key = `${v.color || "Sin color"} / ${v.talle || "Sin talle"}`;
+      const prev = map.get(key) || { color: v.color || "Sin color", talle: v.talle || "Sin talle", stock: 0 };
+      prev.stock += Number(v.stock || 0);
+      map.set(key, prev);
+    });
+    return map;
+  }
+
+  // Umbral de "reponer pronto": al ritmo actual, se agota en 15 días o menos.
+  const DIAS_STOCK_CRITICO = 15;
+  function clasificarPrioridad(unidades, stock, diasStock) {
+    if (unidades === 0) return { prioridad: "Sin ventas en el período", orden: 3, chip: "chip-ok" };
+    if (stock === 0) return { prioridad: "Reponer urgente", orden: 0, chip: "chip-low" };
+    if (diasStock !== null && diasStock <= DIAS_STOCK_CRITICO) return { prioridad: "Reponer pronto", orden: 1, chip: "chip-amber" };
+    return { prioridad: "Stock ok", orden: 2, chip: "chip-green" };
+  }
+
+  // Combina, por producto, las ventas por variante del período con el stock
+  // actual de esa misma variante, y arma una fila por color+talle con su
+  // prioridad de reposición (de más a menos urgente).
+  function calcularReposicion(p, periodo) {
+    const dias = diasParaPeriodo(periodo);
+    const ventas = (p.ventasPorPeriodo[periodo]?.variantesVendidas) || [];
+    const stockMap = stockPorVariante(p);
+
+    const keys = new Set([...stockMap.keys(), ...ventas.map(v => v.variante)]);
+    const filas = Array.from(keys).map(key => {
+      const s = stockMap.get(key);
+      const v = ventas.find(x => x.variante === key);
+      const color = (s && s.color) || (v && v.color) || "Sin color";
+      const talle = (s && s.talle) || (v && v.talle) || "Sin talle";
+      const stock = s ? s.stock : 0;
+      const unidades = v ? v.unidades : 0;
+      const facturacion = v ? v.facturacion : 0;
+      const velocidadDiaria = unidades / dias;
+      const diasStock = velocidadDiaria > 0 ? stock / velocidadDiaria : null;
+      return { color, talle, stock, unidades, facturacion, diasStock, ...clasificarPrioridad(unidades, stock, diasStock) };
+    });
+
+    filas.sort((a, b) => a.orden - b.orden || b.unidades - a.unidades);
+    return filas;
+  }
+
+  // Agrupa las filas de calcularReposicion por color o por talle, para los
+  // dos resúmenes del modal ("Colores a reponer" / "Talles para hacer énfasis").
+  function agruparReposicion(filas, campo, periodo) {
+    const dias = diasParaPeriodo(periodo);
+    const map = new Map();
+    filas.forEach(f => {
+      const key = f[campo];
+      const prev = map.get(key) || { [campo]: key, unidades: 0, stock: 0 };
+      prev.unidades += f.unidades;
+      prev.stock += f.stock;
+      map.set(key, prev);
+    });
+    const arr = Array.from(map.values()).map(g => {
+      const velocidadDiaria = g.unidades / dias;
+      const diasStock = velocidadDiaria > 0 ? g.stock / velocidadDiaria : null;
+      return { ...g, diasStock, ...clasificarPrioridad(g.unidades, g.stock, diasStock) };
+    });
+    if (campo === "talle") {
+      // "Talles para hacer énfasis": orden lógico de talle (S, M, L, XL...), no por prioridad.
+      arr.sort((a, b) => (TALLE_ORDEN[a.talle] ?? 99) - (TALLE_ORDEN[b.talle] ?? 99));
+    } else {
+      arr.sort((a, b) => a.orden - b.orden || b.unidades - a.unidades);
+    }
+    return arr;
+  }
+
+  let reposicionProductoActivo = null;
+
+  function abrirReposicion(productId) {
+    const p = (data.productos || []).find(x => String(x.id) === String(productId));
+    if (!p) return;
+    reposicionProductoActivo = p;
+    const periodo = periodoVendidos;
+    const filas = calcularReposicion(p, periodo);
+    const porColor = agruparReposicion(filas, "color", periodo);
+    const porTalle = agruparReposicion(filas, "talle", periodo);
+    const periodoLabel = (PERIODOS.find(x => x.key === periodo) || {}).label || periodo;
+
+    document.getElementById("reposicionPeriodoLabel").textContent = `Reposición sugerida · ${periodoLabel}`;
+    document.getElementById("reposicionTitulo").textContent = p.producto;
+
+    const filaResumen = (g, campo) => `
+      <div class="flex items-center justify-between gap-2">
+        <span class="truncate">${g[campo]}</span>
+        <span class="flex items-center gap-2 flex-shrink-0">
+          <span class="text-xs text-slate-400">${fmtNum(g.unidades)} v. / ${fmtNum(g.stock)} stock</span>
+          <span class="chip ${g.chip}">${g.prioridad}</span>
+        </span>
+      </div>`;
+
+    document.getElementById("reposicionColores").innerHTML = porColor.map(g => filaResumen(g, "color")).join("") || '<div class="text-slate-400 text-sm">Sin datos.</div>';
+    document.getElementById("reposicionTalles").innerHTML = porTalle.map(g => filaResumen(g, "talle")).join("") || '<div class="text-slate-400 text-sm">Sin datos.</div>';
+
+    // Stock por color, de más a menos — para ver de un vistazo dónde queda concentrado el stock actual.
+    const stockPorColor = [...porColor].sort((a, b) => b.stock - a.stock);
+    document.getElementById("reposicionStockColor").innerHTML = stockPorColor.map(g => `
+      <div class="flex items-center justify-between gap-2">
+        <span class="truncate">${g.color}</span>
+        <span class="text-xs text-slate-500 flex-shrink-0">${fmtNum(g.stock)} u.</span>
+      </div>`).join("") || '<div class="text-slate-400 text-sm">Sin datos.</div>';
+
+    reposicionFilas = filas;
+    reposicionOrdenCampo = "prioridad";
+    reposicionOrdenDir = "asc";
+    renderReposicionTabla();
+    document.getElementById("reposicionFabricaEstado").textContent = "";
+    document.getElementById("btnMandarFabrica").disabled = false;
+    verificarCorteFabricaExistente(p);
+
+    const modal = document.getElementById("modalReposicion");
+    modal.classList.remove("hidden");
+    modal.classList.add("flex");
+  }
+
+  // ---------------- Mandar a Fábrica (corte de reposición) ----------------
+  // Escribe directo en el mismo proyecto de Firebase que usa la app de Fábrica
+  // (bynina-c1eec, path fabrica_v5/), en la sección "Pendiente armar tizada" —
+  // se saltea Moldería/Nuevos Desarrollos porque el artículo ya existe y ya
+  // tiene molde aprobado. El código de Fábrica no se auto-completa (no hay
+  // forma confiable de derivarlo del SKU de Tiendanube) — queda marcado para
+  // que Peque/Ariel lo complete apenas lo abren.
+  function coloresAReponerDe(p) {
+    const periodo = periodoVendidos;
+    const filas = calcularReposicion(p, periodo);
+    return agruparReposicion(filas, "color", periodo).filter(g => g.orden === 0 || g.orden === 1);
+  }
+
+  async function getSeccionPendienteTizadaId() {
+    const snap = await db.ref("fabrica_v5/sections").once("value");
+    const sections = snap.val() || {};
+    const found = Object.entries(sections).find(([, s]) => (s.title || "").trim().toLowerCase() === "pendiente armar tizada");
+    return found ? found[0] : null;
+  }
+
+  async function verificarCorteFabricaExistente(p) {
+    const estadoEl = document.getElementById("reposicionFabricaEstado");
+    try {
+      const snap = await db.ref("fabrica_v5/sections").once("value");
+      const sections = snap.val() || {};
+      let encontrado = null;
+      Object.values(sections).forEach(sec => {
+        Object.values(sec.items || {}).forEach(it => {
+          if (it.dashboard_producto_id === p.id && !it.done && !encontrado) encontrado = it;
+        });
+      });
+      if (encontrado) {
+        estadoEl.className = "text-xs mb-3 text-amber-600 font-semibold";
+        estadoEl.textContent = `🧵 Ya hay un corte de este producto en Fábrica (${encontrado.code || "sin código todavía"}).`;
+      } else {
+        estadoEl.className = "text-xs mb-3 text-slate-400";
+        estadoEl.textContent = "";
+      }
+    } catch (e) { /* si falla la lectura, no bloqueamos el flujo normal del modal */ }
+  }
+
+  async function mandarReposicionAFabrica() {
+    const p = reposicionProductoActivo;
+    if (!p) return;
+    const btn = document.getElementById("btnMandarFabrica");
+    const estadoEl = document.getElementById("reposicionFabricaEstado");
+    const colores = coloresAReponerDe(p);
+    if (!colores.length) { alert("Este producto no tiene colores marcados como 'Reponer urgente' o 'Reponer pronto' en el período elegido."); return; }
+
+    btn.disabled = true;
+    btn.textContent = "Enviando...";
+    try {
+      const destId = await getSeccionPendienteTizadaId();
+      if (!destId) { alert('No encontré la sección "Pendiente armar tizada" en Fábrica — revisá que exista con ese nombre exacto.'); btn.disabled = false; btn.textContent = "🧵 Mandar corte a Fábrica"; return; }
+
+      const notaColores = colores.map(c => `${c.color} (${c.prioridad === "Reponer urgente" ? "🔴 urgente, sin stock" : "🟡 pronto"} — ${fmtNum(c.unidades)} vendidas)`).join(" · ");
+      const newItem = {
+        code: "",
+        codigo_pendiente: true,
+        name: p.producto || "",
+        marca: "By Nina",
+        categoria: p.categoria || null,
+        foto: p.imagen || "",
+        base_aprobada: true,
+        origen_reposicion: true,
+        dashboard_producto_id: p.id,
+        colores_reponer: colores.map(c => ({ color: c.color, unidades: c.unidades, prioridad: c.prioridad })),
+        nota: `🔁 Reposición automática desde Dashboard. Colores a priorizar: ${notaColores}. Completar código de Fábrica y curva de talles a mano.`,
+        done: false,
+        avios: {},
+        fecha_ingreso: Date.now(),
+        fecha_etapa: Date.now(),
+      };
+      await db.ref(`fabrica_v5/sections/${destId}/items`).push(newItem);
+      estadoEl.className = "text-xs mb-3 text-green-600 font-semibold";
+      estadoEl.textContent = "✓ Corte enviado a Fábrica — Pendiente armar tizada.";
+      btn.textContent = "✓ Enviado";
+    } catch (e) {
+      estadoEl.className = "text-xs mb-3 text-red-500 font-semibold";
+      estadoEl.textContent = "Error al enviar: " + e.message;
+      btn.disabled = false;
+      btn.textContent = "🧵 Mandar corte a Fábrica";
+    }
+  }
+
+  // Orden de talles habituales para que "Ordenar por talle" tenga sentido
+  // (S antes que M antes que L) en vez de orden alfabético puro.
+  const TALLE_ORDEN = { "XS": 0, "S": 1, "M": 2, "L": 3, "XL": 4, "XXL": 5, "XXXL": 6 };
+
+  const REPOSICION_COLUMNAS = [
+    { campo: "color", label: "Color", align: "left" },
+    { campo: "talle", label: "Talle", align: "left" },
+    { campo: "unidades", label: "Vendidos", align: "right" },
+    { campo: "stock", label: "Stock", align: "right" },
+    { campo: "diasStock", label: "Días de stock", align: "right" },
+    { campo: "prioridad", label: "Prioridad", align: "left" },
+  ];
+
+  let reposicionFilas = [];
+  let reposicionOrdenCampo = "prioridad";
+  let reposicionOrdenDir = "asc";
+
+  function ordenarReposicion(campo) {
+    if (reposicionOrdenCampo === campo) {
+      reposicionOrdenDir = reposicionOrdenDir === "asc" ? "desc" : "asc";
+    } else {
+      reposicionOrdenCampo = campo;
+      // Texto arranca ascendente (A-Z); números y prioridad arrancan mostrando lo más relevante primero.
+      reposicionOrdenDir = (campo === "color" || campo === "talle") ? "asc" : "desc";
+    }
+    renderReposicionTabla();
+  }
+
+  function renderReposicionTabla() {
+    const campo = reposicionOrdenCampo;
+    const dir = reposicionOrdenDir;
+    const mult = dir === "asc" ? 1 : -1;
+
+    const filas = [...reposicionFilas].sort((a, b) => {
+      let va, vb;
+      if (campo === "prioridad") { va = a.orden; vb = b.orden; }
+      else if (campo === "talle") { va = TALLE_ORDEN[a.talle] ?? 99; vb = TALLE_ORDEN[b.talle] ?? 99; }
+      else if (campo === "diasStock") { va = a.diasStock === null ? Infinity : a.diasStock; vb = b.diasStock === null ? Infinity : b.diasStock; }
+      else { va = a[campo]; vb = b[campo]; }
+
+      const result = typeof va === "string" ? va.localeCompare(vb, "es") * mult : (va - vb) * mult;
+
+      // Desempate: si no estamos ordenando ya por talle, usamos el orden lógico de talles
+      // (S, M, L, XL...) en vez de "más vendido primero", para que la grilla no salga
+      // en orden alfabético de talle cuando ordenás por color (esto antes no se aplicaba
+      // en columnas de texto porque el return anterior cortaba antes de llegar acá).
+      if (result === 0 && campo !== "talle") {
+        const ta = TALLE_ORDEN[a.talle] ?? 99, tb = TALLE_ORDEN[b.talle] ?? 99;
+        if (ta !== tb) return ta - tb;
+        return b.unidades - a.unidades;
+      }
+      return result;
+    });
+
+    document.getElementById("reposicionTablaHead").innerHTML = `
+      <tr class="text-left text-slate-400 text-xs uppercase border-b border-slate-100 bg-slate-50">
+        ${REPOSICION_COLUMNAS.map(c => `
+          <th class="py-2 px-3 ${c.align === "right" ? "text-right" : ""} cursor-pointer select-none hover:text-slate-600" onclick="ordenarReposicion('${c.campo}')">
+            ${c.label}${reposicionOrdenCampo === c.campo ? (reposicionOrdenDir === "asc" ? " ▲" : " ▼") : ""}
+          </th>`).join("")}
+      </tr>`;
+
+    document.getElementById("reposicionTabla").innerHTML = filas.map(f => `
+      <tr class="border-b border-slate-50">
+        <td class="py-2 px-3">${f.color}</td>
+        <td class="py-2 px-3">${f.talle}</td>
+        <td class="py-2 px-3 text-right font-semibold">${fmtNum(f.unidades)}</td>
+        <td class="py-2 px-3 text-right">${fmtNum(f.stock)}</td>
+        <td class="py-2 px-3 text-right text-slate-500">${f.diasStock === null ? "—" : fmtNum(f.diasStock)}</td>
+        <td class="py-2 px-3"><span class="chip ${f.chip}">${f.prioridad}</span></td>
+      </tr>`).join("") || '<tr><td colspan="6" class="text-center text-slate-400 py-6">Sin datos.</td></tr>';
+  }
+
+  function cerrarReposicion() {
+    const modal = document.getElementById("modalReposicion");
+    modal.classList.add("hidden");
+    modal.classList.remove("flex");
+  }
+
+  // "Productos ganadores": los que venden por encima del promedio (según el
+  // criterio elegido: unidades o facturación) entre los productos con venta
+  // en el período/categoría/búsqueda actual. Para cada uno se muestra el
+  // color y el talle que más vendieron.
+  function renderGanadores(productos) {
+    const valores = productos.map(p => p.ventasPorPeriodo[periodoVendidos]?.[vendidosCriterio] || 0);
+    const promedio = valores.length ? valores.reduce((a, b) => a + b, 0) / valores.length : 0;
+
+    const ganadores = productos
+      .filter(p => (p.ventasPorPeriodo[periodoVendidos]?.[vendidosCriterio] || 0) > promedio)
+      .sort((a, b) => (b.ventasPorPeriodo[periodoVendidos]?.[vendidosCriterio] || 0) - (a.ventasPorPeriodo[periodoVendidos]?.[vendidosCriterio] || 0));
+
+    const promedioFmt = vendidosCriterio === "facturacion" ? fmtMoney(promedio) : fmtNum(promedio) + " u.";
+    document.getElementById("vendidosGanadoresPromedio").textContent = productos.length ? `Promedio: ${promedioFmt}` : "";
+    document.getElementById("vendidosGanadoresDesc").textContent = productos.length
+      ? `${ganadores.length} de ${productos.length} productos venden por encima del promedio en este período${vendidosCategoria ? " (dentro de " + vendidosCategoria + ")" : ""}.`
+      : "Sin ventas en este período para calcular un promedio.";
+
+    document.getElementById("vendidosGanadoresLista").innerHTML = ganadores.slice(0, 12).map(p => {
+      const v = p.ventasPorPeriodo[periodoVendidos];
+      const valor = v[vendidosCriterio] || 0;
+      const pct = promedio > 0 ? ((valor - promedio) / promedio) * 100 : 0;
+      const colorTop = v.colorMasVendido ? `${v.colorMasVendido.color} (${fmtNum(v.colorMasVendido.unidades)} u.)` : "—";
+      const talleTop = v.talleMasVendido ? `${v.talleMasVendido.talle} (${fmtNum(v.talleMasVendido.unidades)} u.)` : "—";
+      return `
+      <div class="bg-white border border-indigo-100 rounded-lg px-3.5 py-2.5">
+        <div class="flex items-center justify-between gap-2">
+          <div class="font-semibold text-sm text-slate-800 truncate">${p.producto}</div>
+          <span class="chip chip-green flex-shrink-0">▲ ${pct.toFixed(0)}%</span>
+        </div>
+        <div class="text-xs text-slate-500 mt-1">${vendidosCriterio === "facturacion" ? fmtMoney(valor) : fmtNum(valor) + " u."}</div>
+        <div class="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-slate-500 mt-1.5">
+          <span>🎨 Color top: <b class="text-slate-700">${colorTop}</b></span>
+          <span>📐 Talle top: <b class="text-slate-700">${talleTop}</b></span>
+        </div>
+      </div>`;
+    }).join("") || '<div class="text-slate-400 text-sm col-span-2">Ningún producto supera el promedio todavía.</div>';
+  }
+
+  // ---------------- Productos nuevos ----------------
+  function renderNuevos() {
+    const PERIODOS_NUEVOS = [{ key: "7dias", label: "Últimos 7 días" }, { key: "15dias", label: "Últimos 15 días" }, { key: "30dias", label: "Último mes" }];
+    const el = document.getElementById("pillsPeriodoNuevos");
+    el.innerHTML = PERIODOS_NUEVOS.map(p => `<button class="pill ${p.key === periodoNuevos ? "active" : ""}" data-key="${p.key}">${p.label}</button>`).join("");
+    el.querySelectorAll("button").forEach(btn => btn.addEventListener("click", () => { periodoNuevos = btn.dataset.key; renderNuevos(); }));
+
+    const dias = (data.periodosDias || {})[periodoNuevos] || 15;
+    const corte = new Date(); corte.setDate(corte.getDate() - dias);
+
+    let productos = (data.productos || []).filter(p => p.creado && new Date(p.creado) >= corte);
+    if (nuevosBuscar.trim()) { const q = nuevosBuscar.trim().toLowerCase(); productos = productos.filter(p => p.producto.toLowerCase().includes(q)); }
+
+    const vendieron = productos.filter(p => p.ventasTotales.unidades > 0).sort((a, b) => new Date(b.creado) - new Date(a.creado));
+    const sinVenta = productos.filter(p => p.ventasTotales.unidades === 0).sort((a, b) => new Date(b.creado) - new Date(a.creado));
+
+    document.getElementById("nuevosCount").textContent = `${productos.length} productos agregados · ${vendieron.length} ya vendieron · ${sinVenta.length} sin ventas`;
+    document.getElementById("nuevosVendieronTitulo").textContent = `YA VENDIERON (${vendieron.length})`;
+    document.getElementById("nuevosSinVentaTitulo").textContent = `SIN VENTAS (${sinVenta.length})`;
+
+    function card(p) {
+      return `
+      <div class="card p-4 flex items-center gap-4">
+        <img src="${p.imagen || ""}" class="w-14 h-16 object-cover rounded-lg bg-slate-100 flex-shrink-0" onerror="this.style.visibility='hidden'" />
+        <div class="flex-1 min-w-0">
+          <div class="font-bold text-sm">${p.producto}</div>
+          <div class="text-xs text-slate-400 mt-0.5">${p.categoria} · alta ${fmtFecha(p.creado)}</div>
+          ${p.ventasTotales.unidades > 0 ? `<span class="chip chip-green mt-1 inline-block">${fmtNum(p.ventasTotales.unidades)} vendidas</span>` : ""}
+        </div>
+        <div class="text-right flex-shrink-0"><div class="text-lg font-bold">${fmtNum(p.stockTotal)}</div><div class="text-xs text-slate-400">unid.</div></div>
+      </div>`;
+    }
+    document.getElementById("nuevosVendieron").innerHTML = vendieron.map(card).join("") || '<div class="text-slate-400 text-sm">Ninguno todavía.</div>';
+    document.getElementById("nuevosSinVenta").innerHTML = sinVenta.map(card).join("") || '<div class="text-slate-400 text-sm">Todos vendieron.</div>';
+  }
+
+  // ---------------- Sin ventas ----------------
+  function renderSinVentas() {
+    pillsHtml("pillsPeriodoSinVentas", periodoSinVentas, (k) => { periodoSinVentas = k; renderSinVentas(); });
+    llenarSelectCategorias("sinventasCategoria", sinventasCategoria);
+
+    let productos = (data.productos || []).filter(p => (p.ventasPorPeriodo[periodoSinVentas]?.unidades || 0) === 0);
+    if (sinventasCategoria) productos = productos.filter(p => productoEnCategoria(p, sinventasCategoria));
+    if (sinventasBuscar.trim()) { const q = sinventasBuscar.trim().toLowerCase(); productos = productos.filter(p => p.producto.toLowerCase().includes(q)); }
+
+    if (sinventasStock === "conStock") productos = productos.filter(p => p.stockTotal > 0);
+    else if (sinventasStock === "sinStock") productos = productos.filter(p => p.stockTotal === 0);
+
+    const sorters = {
+      masNuevos: (a, b) => new Date(b.creado || 0) - new Date(a.creado || 0),
+      mayorStock: (a, b) => b.stockTotal - a.stockTotal,
+      menorStock: (a, b) => a.stockTotal - b.stockTotal,
+      sinVenderMasTiempo: (a, b) => new Date(a.ventasTotales.ultimaVenta || 0) - new Date(b.ventasTotales.ultimaVenta || 0),
+      nombre: (a, b) => a.producto.localeCompare(b.producto, "es"),
+    };
+    productos.sort(sorters[sinventasOrden] || sorters.masNuevos);
+
+    document.getElementById("sinventasCount").textContent = `${productos.length} productos sin ventas`;
+
+    document.getElementById("sinventasLista").innerHTML = productos.slice(0, 100).map(p => `
+      <div class="card p-4 flex items-center gap-4">
+        <img src="${p.imagen || ""}" class="w-14 h-16 object-cover rounded-lg bg-slate-100 flex-shrink-0" onerror="this.style.visibility='hidden'" />
+        <div class="flex-1 min-w-0">
+          <div class="font-bold text-sm">${p.producto}</div>
+          <div class="text-xs text-slate-400 mt-0.5">${p.categoria} ${p.publicado ? '· <span class="text-green-600 font-semibold">Publicado</span>' : '· <span class="text-slate-400">Oculto</span>'}</div>
+          <div class="text-xs text-slate-400 mt-0.5">Última venta: ${fmtFecha(p.ventasTotales.ultimaVenta)}</div>
+          ${p.colorMasStock ? `<div class="text-xs text-amber-600 font-semibold mt-1">Más stock en: ${p.colorMasStock.color} (${fmtNum(p.colorMasStock.stock)} u.)</div>` : ""}
+        </div>
+        <div class="text-right flex-shrink-0"><div class="text-lg font-bold">${fmtNum(p.stockTotal)}</div><div class="text-xs text-slate-400">unid.</div></div>
+      </div>`).join("") || '<div class="text-slate-400 text-sm p-4">Ningún producto coincide con el filtro.</div>';
+  }
+
+  function renderAll() {
+    renderDashboard(); try{ renderFoco(); }catch(e){ console.error(e); } try{ renderClasif(); }catch(e){ console.error(e); } renderStock(); renderUltimas(); renderVendidos(); renderNuevos(); renderSinVentas(); renderObjetivos(); renderGanadoresTab();
+  }
+
+  // ---------------- Resumen (Web y Local separados, misma estructura en las dos) ----------------
+  // ---------------- Ganadores (pestaña con foto + cortado vs. período) ----------------
+  let ganadoresPeriodo = "mensual";
+  let ganadoresCategoria = "";
+  let ganadoresOrdenModo = "auto"; // "auto" (por unidades vendidas) o "manual" (drag and drop)
+  let ganadoresOrdenManual = []; // array de product ids, en el orden que armó Ariel
+  let fabricaSectionsCache = null; // se carga una sola vez por sesión y se reusa
+
+  async function getFabricaSectionsCache() {
+    if (fabricaSectionsCache) return fabricaSectionsCache;
+    try {
+      const snap = await db.ref("fabrica_v5/sections").once("value");
+      fabricaSectionsCache = snap.val() || {};
+    } catch (e) {
+      fabricaSectionsCache = {};
+    }
+    return fabricaSectionsCache;
+  }
+
+  // Suma lo cortado (item.capas → cant por talle, ya congelado en "Marcar cortado") de todos
+  // los ítems de Fábrica cuyo código matchea el inicio de algún SKU de este producto, con
+  // fecha de corte dentro del período elegido. Si no hay match de código, devuelve null.
+  function cortadoDeItem(item) {
+    return Object.values(item.capas || {}).reduce((s, row) => s + Object.values(row.cant || {}).reduce((s2, n) => s2 + (parseInt(n) || 0), 0), 0);
+  }
+  async function cortadoPorProducto(p, periodo) {
+    const sections = await getFabricaSectionsCache();
+    const skus = (p.variantes || []).map(v => (v.sku || "").toUpperCase()).filter(Boolean);
+    if (!skus.length) return null;
+    const dias = periodo === "quincena" ? 15 : 30;
+    const corte = new Date(); corte.setDate(corte.getDate() - dias);
+    let total = 0, matcheo = false;
+    Object.values(sections).forEach(sec => {
+      Object.values(sec.items || {}).forEach(it => {
+        const code = (it.code || "").toUpperCase();
+        if (!code) return;
+        if (!skus.some(s => s.startsWith(code))) return;
+        if (!it.fecha_corte) return;
+        const f = new Date(it.fecha_corte);
+        if (isNaN(f) || f < corte) return;
+        matcheo = true;
+        total += cortadoDeItem(it);
+      });
+    });
+    return matcheo ? total : null;
+  }
+
+  // Fuente única de "cuáles son los ganadores ahora" (antes de ordenar/filtrar) — la reusan
+  // tanto el cálculo de promedio como el filtro de categoría y el orden manual.
+  function calcularGanadoresBase(periodoVentas) {
+    const productos = (data.productos || []).filter(p => p.ventasPorPeriodo && p.ventasPorPeriodo[periodoVentas]);
+    const valores = productos.map(p => p.ventasPorPeriodo[periodoVentas]?.unidades || 0);
+    const promedio = valores.length ? valores.reduce((a, b) => a + b, 0) / valores.length : 0;
+    const ganadores = productos.filter(p => (p.ventasPorPeriodo[periodoVentas]?.unidades || 0) > promedio);
+    return { productos, promedio, ganadores };
+  }
+
+  // Color con más stock disponible de un producto — para sugerir cuál conviene mostrar como
+  // foto principal si la idea es empujar lo que sobra en depósito, no necesariamente lo que ya
+  // es tendencia (la foto de portada hoy suele ser la del color que más vende, no la de más stock).
+  function colorConMasStock(p) {
+    const porColor = {};
+    (p.variantes || []).forEach(v => {
+      if (!v.color) return;
+      porColor[v.color] = (porColor[v.color] || 0) + (v.stock || 0);
+    });
+    const entries = Object.entries(porColor).filter(([, stock]) => stock > 0);
+    if (!entries.length) return null;
+    entries.sort((a, b) => b[1] - a[1]);
+    return { color: entries[0][0], stock: entries[0][1] };
+  }
+
+  async function renderGanadoresTab() {
+    if (!data) return;
+    document.getElementById("ganadoresPeriodo").querySelectorAll("button").forEach(b => b.classList.toggle("active", b.dataset.periodo === ganadoresPeriodo));
+    document.getElementById("ganadoresOrdenModo").querySelectorAll("button").forEach(b => b.classList.toggle("active", b.dataset.modo === ganadoresOrdenModo));
+    document.getElementById("ganadoresOrdenHint").textContent = ganadoresOrdenModo === "manual" ? "Arrastrá las tarjetas para reordenar." : "";
+
+    const periodoVentas = ganadoresPeriodo === "quincena" ? "15dias" : "estemes";
+    const { productos, promedio, ganadores: ganadoresTodos } = calcularGanadoresBase(periodoVentas);
+
+    // Selector de categoría: se arma con las categorías presentes entre los ganadores del período.
+    const categorias = Array.from(new Set(ganadoresTodos.map(p => p.categoria || "Sin categoría"))).sort();
+    const selCat = document.getElementById("ganadoresCategoria");
+    const catPrevia = ganadoresCategoria;
+    selCat.innerHTML = `<option value="">Todas las categorías</option>` + categorias.map(c => `<option value="${c}">${c}</option>`).join("");
+    selCat.value = categorias.includes(catPrevia) ? catPrevia : "";
+    ganadoresCategoria = selCat.value;
+
+    let ganadores = ganadoresCategoria ? ganadoresTodos.filter(p => (p.categoria || "Sin categoría") === ganadoresCategoria) : ganadoresTodos;
+
+    if (ganadoresOrdenModo === "manual") {
+      const idsSet = new Set(ganadores.map(p => p.id));
+      const enOrden = ganadoresOrdenManual.filter(id => idsSet.has(id));
+      const sinOrden = ganadores.filter(p => !ganadoresOrdenManual.includes(p.id));
+      const porId = new Map(ganadores.map(p => [p.id, p]));
+      ganadores = [...enOrden.map(id => porId.get(id)), ...sinOrden];
+    } else {
+      ganadores.sort((a, b) => (b.ventasPorPeriodo[periodoVentas]?.unidades || 0) - (a.ventasPorPeriodo[periodoVentas]?.unidades || 0));
+    }
+
+    document.getElementById("ganadoresDesc").textContent = productos.length
+      ? `${ganadoresTodos.length} de ${productos.length} productos venden por encima del promedio (${fmtNum(promedio)} u.) — ${ganadoresPeriodo === "quincena" ? "últimos 15 días" : "este mes"}.${ganadoresCategoria ? ` Mostrando "${ganadoresCategoria}" (${ganadores.length}).` : ""}`
+      : "Sin ventas en este período.";
+
+    const grid = document.getElementById("ganadoresGrid");
+    grid.innerHTML = ganadores.slice(0, 40).map(p => {
+      const masStock = colorConMasStock(p);
+      return `
+      <div class="card overflow-hidden cursor-pointer hover:shadow-md transition-shadow" data-ganador-id="${p.id}" ${ganadoresOrdenModo === "manual" ? 'draggable="true"' : ""} onclick="if(!ganadoresArrastrando) abrirReposicion('${p.id}')">
+        <img src="${p.imagen || ""}" class="w-full aspect-square object-cover bg-slate-100" onerror="this.style.visibility='hidden'" />
+        <div class="p-2.5">
+          <div class="font-semibold text-xs text-slate-800 leading-tight" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${p.producto}</div>
+          <div class="text-[11px] text-slate-500 mt-1">${fmtNum(p.ventasPorPeriodo[periodoVentas]?.unidades || 0)} vendidas</div>
+          ${masStock ? `<div class="text-[11px] text-indigo-600 font-semibold mt-0.5">📦 Más stock: ${masStock.color} (${fmtNum(masStock.stock)}u)</div>` : ""}
+          <div class="text-[11px] text-slate-400 ganador-cortado">·</div>
+        </div>
+      </div>`;
+    }).join("") || '<div class="text-slate-400 text-sm col-span-full">Ningún producto supera el promedio todavía.</div>';
+
+    if (ganadoresOrdenModo === "manual") activarDragGanadores(grid);
+
+    // El cruce con Fábrica es async (lee otro proyecto/nodo Firebase) — se resuelve por
+    // separado para no bloquear el render inicial de las tarjetas.
+    ganadores.slice(0, 40).forEach(async p => {
+      const cortado = await cortadoPorProducto(p, ganadoresPeriodo);
+      const el = grid.querySelector(`[data-ganador-id="${p.id}"] .ganador-cortado`);
+      if (!el) return;
+      el.textContent = cortado === null ? "" : `✂️ ${fmtNum(cortado)} cortadas`;
+    });
+  }
+
+  // ---- Drag and drop para "Mi orden" ----
+  let ganadoresArrastrando = false;
+  function activarDragGanadores(grid) {
+    let dragEl = null;
+    grid.querySelectorAll("[data-ganador-id]").forEach(card => {
+      card.addEventListener("dragstart", () => { dragEl = card; ganadoresArrastrando = true; card.style.opacity = "0.4"; });
+      card.addEventListener("dragend", () => {
+        card.style.opacity = "1";
+        setTimeout(() => { ganadoresArrastrando = false; }, 50); // evita que el click posterior al soltar abra el modal
+        guardarOrdenManualGanadores(grid);
+      });
+      card.addEventListener("dragover", e => {
+        e.preventDefault();
+        if (!dragEl || dragEl === card) return;
+        const rect = card.getBoundingClientRect();
+        const after = (e.clientX - rect.left) > rect.width / 2;
+        card.parentNode.insertBefore(dragEl, after ? card.nextSibling : card);
+      });
+    });
+  }
+  function guardarOrdenManualGanadores(grid) {
+    ganadoresOrdenManual = Array.from(grid.querySelectorAll("[data-ganador-id]")).map(el => el.dataset.ganadorId);
+    db.ref("dashboard_ganadores_orden").set(ganadoresOrdenManual);
+  }
+  db.ref("dashboard_ganadores_orden").on("value", snap => {
+    ganadoresOrdenManual = snap.val() || [];
+    if (data && ganadoresOrdenModo === "manual") renderGanadoresTab();
+  });
+
+  document.getElementById("ganadoresCategoria").addEventListener("change", e => {
+    ganadoresCategoria = e.target.value; renderGanadoresTab();
+  });
+  document.getElementById("ganadoresOrdenModo").addEventListener("click", e => {
+    const btn = e.target.closest("button"); if (!btn) return;
+    ganadoresOrdenModo = btn.dataset.modo; renderGanadoresTab();
+  });
+  document.getElementById("ganadoresPeriodo").addEventListener("click", e => {
+    const btn = e.target.closest("button"); if (!btn) return;
+    ganadoresPeriodo = btn.dataset.periodo; renderGanadoresTab();
+  });
+
+  // ---------------- Listeners ----------------
+  document.getElementById("stockBuscar").addEventListener("input", e => { stockBuscar = e.target.value; renderStock(); });
+  document.getElementById("stockMin").addEventListener("input", e => { stockMin = e.target.value === "" ? null : Number(e.target.value); renderStock(); });
+  document.getElementById("stockMax").addEventListener("input", e => { stockMax = e.target.value === "" ? null : Number(e.target.value); renderStock(); });
+  document.getElementById("stockCategoria").addEventListener("change", e => { stockCategoria = e.target.value; renderStock(); });
+  document.getElementById("stockOcultos").addEventListener("change", e => { stockOcultos = e.target.checked; renderStock(); });
+  document.getElementById("stockOrden").addEventListener("click", e => {
+    const btn = e.target.closest("button"); if (!btn) return;
+    stockOrden = btn.dataset.crit;
+    document.querySelectorAll("#stockOrden button").forEach(b => b.classList.toggle("active", b === btn));
+    renderStock();
+  });
+
+  document.getElementById("ultimasCategoria").addEventListener("change", e => { ultimasCategoria = e.target.value; renderUltimas(); });
+  document.getElementById("ultimasBuscar").addEventListener("input", e => { ultimasBuscar = e.target.value; renderUltimas(); });
+  document.getElementById("ultimasRapido").addEventListener("click", () => { ultimasRapido = true; document.getElementById("ultimasRapido").classList.add("active"); document.getElementById("ultimasTodos").classList.remove("active"); renderUltimas(); });
+  document.getElementById("ultimasTodos").addEventListener("click", () => { ultimasRapido = false; document.getElementById("ultimasTodos").classList.add("active"); document.getElementById("ultimasRapido").classList.remove("active"); renderUltimas(); });
+
+  document.getElementById("vendidosCategoria").addEventListener("change", e => { vendidosCategoria = e.target.value; renderVendidos(); });
+  document.getElementById("vendidosBuscar").addEventListener("input", e => { vendidosBuscar = e.target.value; renderVendidos(); });
+  document.getElementById("vendidosCriterio").addEventListener("click", e => {
+    const btn = e.target.closest("button"); if (!btn) return;
+    vendidosCriterio = btn.dataset.crit;
+    document.querySelectorAll("#vendidosCriterio button").forEach(b => b.classList.toggle("active", b === btn));
+    renderVendidos();
+  });
+  document.getElementById("vendidosVistaSel").addEventListener("click", e => {
+    const btn = e.target.closest("button"); if (!btn) return;
+    vendidosVista = btn.dataset.vista;
+    document.querySelectorAll("#vendidosVistaSel button").forEach(b => b.classList.toggle("active", b === btn));
+    renderVendidos();
+  });
+
+  document.getElementById("nuevosBuscar").addEventListener("input", e => { nuevosBuscar = e.target.value; renderNuevos(); });
+
+  document.getElementById("sinventasCategoria").addEventListener("change", e => { sinventasCategoria = e.target.value; renderSinVentas(); });
+  document.getElementById("sinventasBuscar").addEventListener("input", e => { sinventasBuscar = e.target.value; renderSinVentas(); });
+  document.getElementById("sinventasStockFiltro").addEventListener("click", e => {
+    const btn = e.target.closest("button"); if (!btn) return;
+    sinventasStock = btn.dataset.crit;
+    document.querySelectorAll("#sinventasStockFiltro button").forEach(b => b.classList.toggle("active", b === btn));
+    renderSinVentas();
+  });
+  document.getElementById("sinventasOrden").addEventListener("click", e => {
+    const btn = e.target.closest("button"); if (!btn) return;
+    sinventasOrden = btn.dataset.crit;
+    document.querySelectorAll("#sinventasOrden button").forEach(b => b.classList.toggle("active", b === btn));
+    renderSinVentas();
+  });
+
+  document.getElementById("btnActualizar").addEventListener("click", (e) => {
+    e.target.disabled = true;
+    setTimeout(() => { e.target.disabled = false; }, 1200);
+  });
+
+  db.ref("dashboard").on("value", (snap) => {
+    data = snap.val();
+    if (!data) return;
+    document.getElementById("ultimaActualizacion").textContent = "Actualizado: " + new Date(data.actualizado).toLocaleString("es-AR");
+    document.getElementById("loading").classList.add("hidden");
+    document.getElementById("app").classList.remove("hidden");
+    renderAll();
+  }, (err) => {
+    document.getElementById("loading").innerHTML = '<div class="text-red-500 text-sm">Error cargando datos: ' + err.message + "</div>";
+  });
+</script>
+
+</body>
+</html>
