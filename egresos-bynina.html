@@ -1031,12 +1031,29 @@ function bindCaja(){
 function chequesAgenda(hasta){
   return listaEgresos().filter(e=>e.cheque&&e.cheque.venc&&(e.cheque.venc<=hasta)).map(e=>({tipo:'cheque',id:e.id,fecha:e.cheque.venc,monto:Number(e.monto),moneda:e.moneda||'ARS',cotizacion:e.cotizacion,pagado:!!e.cheque.debitado,e}));
 }
+// Día real en que el banco debita un cheque: si vence sábado o domingo, se corre al lunes.
+function diaDebito(f){const d=fromIso(f).getDay();return d===6?addDias(f,2):d===0?addDias(f,1):f}
+// Franja "Cheques a debitar por día": cheques y echeq sin debitar (no se pueden mover ni postergar).
+// Una casilla para lo vencido y una por cada día con cheques en los próximos 14 días, por día real de débito.
+function chequesDiaHtml(){
+  const t=hoy(),hasta=addDias(t,14),l=chequesAgenda(addDias(hasta,2)).filter(o=>!o.pagado);
+  const venc=l.filter(o=>diaDebito(o.fecha)<t),dias={};
+  l.forEach(o=>{const f=diaDebito(o.fecha);if(f>=t&&f<=hasta)(dias[f]=dias[f]||[]).push(o)});
+  const cnt=x=>{const n=x.length,ech=x.every(o=>/echeq/i.test(medNom(o.e.medio)||''));return n+' '+(ech?'echeq':'cheque'+(n>1?'s':''))};
+  const caja=(tit,x,bg,col,brd)=>`<div style="flex:none;min-width:118px;background:${bg};${brd?'border:1px solid var(--line);':''}border-radius:var(--r);padding:8px 10px"><div style="font-size:12px;color:${col}">${tit}</div><div class="num" style="font-weight:700;color:${col==='var(--muted)'?'var(--ink)':col}">${money(sumar(x))}</div><div style="font-size:11px;color:${col}">${cnt(x)}</div></div>`;
+  const nomDia=f=>{const d=fromIso(f).toLocaleDateString('es-AR',{weekday:'short'}).replace('.','');return d.charAt(0).toUpperCase()+d.slice(1)+' '+fmtFc(f)};
+  const cajas=(venc.length?caja('Vencidos',venc,'var(--danger-bg)','var(--danger)'):'')+Object.keys(dias).sort().map(f=>f===t?caja('Hoy '+nomDia(f),dias[f],'var(--warn-bg)','var(--warn)'):caja(nomDia(f),dias[f],'var(--card)','var(--muted)',true)).join('');
+  return `<div class="card" style="margin-bottom:12px"><div class="hdr" style="margin:0 0 8px"><span style="font-weight:700">Cheques a debitar por día</span><span class="sub" style="margin:0">próximos 14 días</span></div>
+    ${cajas?`<div style="display:flex;flex-wrap:wrap;gap:8px">${cajas}</div>`:'<div class="sub">No hay cheques a debitar en los próximos 14 días.</div>'}
+    <div class="sub" style="margin:6px 0 0">Solo cheques y echeq. Los que vencen sábado o domingo se suman al lunes.</div></div>`;
+}
 function agendaItems(hasta){return ocurrencias(hasta).concat(chequesAgenda(hasta)).sort((a,b)=>a.fecha.localeCompare(b.fecha)||b.monto-a.monto)}
 function itemCheque(o){
   const t=hoy(),e=o.e,c=e.cheque;let pill='';
   if(o.pagado)pill='<span class="pill p-ok">Debitado</span>';
-  else if(o.fecha<t)pill='<span class="pill" style="background:var(--danger-bg);color:var(--danger);font-weight:700">¿Se debitó?</span>';
-  else if(o.fecha===t)pill='<span class="pill p-pend">Hoy</span>';
+  else if(diaDebito(o.fecha)<t)pill='<span class="pill" style="background:var(--danger-bg);color:var(--danger);font-weight:700">¿Se debitó?</span>';
+  else if(diaDebito(o.fecha)===t)pill='<span class="pill p-pend">Hoy</span>';
+  else if(diaDebito(o.fecha)!==o.fecha)pill='<span class="pill p-na">Se debita el lun '+fmtFc(diaDebito(o.fecha))+'</span>';
   else pill='<span class="pill p-na">A debitar</span>';
   const sub=[fmtFc(o.fecha),bancoNom(c.banco),razonNom(c.razon),e.cuenta?'':catNom(e.categoria),'firmado '+fmtFc(e.fecha)].filter(Boolean).join(' · ');
   return `<div class="row" data-eg="${e.id}" style="align-items:center">
@@ -1289,15 +1306,22 @@ function vAgenda(){
   }else if(modo==='caja'){body=cajaHtml();
   }else if(modo==='cheques'){
     const f=S.chFiltro||'pend';
-    let l=chequesAgenda('2999-12-31');if(f==='pend')l=l.filter(o=>!o.pagado);if(f==='deb')l=l.filter(o=>o.pagado);
+    const todosCh=chequesAgenda('2999-12-31'),esVenc=o=>!o.pagado&&diaDebito(o.fecha)<t,nVenc=todosCh.filter(esVenc).length;
+    let l=todosCh;if(f==='pend')l=l.filter(o=>!o.pagado);if(f==='deb')l=l.filter(o=>o.pagado);if(f==='venc')l=l.filter(esVenc);
     const ag=S.chAgrupa||'venc',fKey=o=>ag==='firma'?(o.e.fecha||o.fecha):o.fecha;
     l.sort((a,b)=>f==='deb'?fKey(b).localeCompare(fKey(a)):fKey(a).localeCompare(fKey(b)));
-    const porMes={};l.forEach(o=>{const m=fKey(o).slice(0,7);(porMes[m]=porMes[m]||[]).push(o)});
-    body=`<div class="grid2" style="margin-bottom:8px"><button id="chant">Marcar cheques anteriores</button><button id="chfdeb">Cambiar fecha de débito</button></div><div class="chips" style="margin-bottom:6px">${[['pend','A debitar'],['deb','Debitados'],['todos','Todos']].map(([k,x])=>`<button class="chip ${f===k?'on':''}" data-chf="${k}">${x}</button>`).join('')}</div>
+    // En "Vencidos" y "A debitar", todo lo vencido sin debitar va junto en un solo grupo arriba, sin importar el mes.
+    const juntarVenc=f==='venc'||f==='pend',vencL=juntarVenc?l.filter(esVenc).sort((a,b)=>a.fecha.localeCompare(b.fecha)):[];
+    const porMes={};if(vencL.length)porMes['_venc']=vencL;
+    l.forEach(o=>{if(juntarVenc&&esVenc(o))return;const m=fKey(o).slice(0,7);(porMes[m]=porMes[m]||[]).push(o)});
+    const grupoTit=(m,x)=>m!=='_venc'?`<span style="font-weight:700">${mesNom(m+'-01')}</span><span class="sub" style="margin:0">${x.length} cheque${x.length>1?'s':''}</span>`
+      :`<span style="font-weight:700;color:var(--danger)">Vencidos sin debitar</span><span class="sub" style="margin:0;color:var(--danger)">${x.length} cheque${x.length>1?'s':''} · ${x[0].fecha===x[x.length-1].fecha?'del '+fmtFc(x[0].fecha):'del '+fmtFc(x[0].fecha)+' al '+fmtFc(x[x.length-1].fecha)}</span>`;
+    const grupoAb=m=>{const k=ag+m,o=S.chMesAb||{};return k in o?o[k]:m==='_venc'};
+    body=chequesDiaHtml()+`<div class="grid2" style="margin-bottom:8px"><button id="chant">Marcar cheques anteriores</button><button id="chfdeb">Cambiar fecha de débito</button></div><div class="chips" style="margin-bottom:6px">${[['venc','Vencidos'+(nVenc?' · '+nVenc:'')],['pend','A debitar'],['deb','Debitados'],['todos','Todos']].map(([k,x])=>`<button class="chip ${f===k?'on':''}" data-chf="${k}" ${k==='venc'&&nVenc&&f!==k?'style="color:var(--danger);border-color:#f3c6c1"':''}>${x}</button>`).join('')}</div>
       <div class="chips" style="margin-bottom:6px"><span class="sub" style="margin:0;align-self:center">Agrupar por mes de:</span>${[['venc','Vencimiento'],['firma','Firma']].map(([k,x])=>`<button class="chip ${ag===k?'on':''}" data-cha="${k}">${x}</button>`).join('')}</div>
       <div class="hdr" style="margin:6px 0"><span class="sub">${l.length} cheques</span><span class="num" style="font-weight:700">${money(sumar(l))}</span></div>
-      ${l.length?`<div class="list">${Object.entries(porMes).map(([m,x])=>{const ab=!!(S.chMesAb||{})[ag+m];return `<button data-chm="${ag+m}" class="row" style="width:100%;border:0;border-bottom:1px solid var(--line);border-radius:0;background:#fafbfc;align-items:center"><span style="display:flex;gap:8px;align-items:center"><span style="width:14px;color:var(--muted)">${ab?'▾':'▸'}</span><span style="font-weight:700">${mesNom(m+'-01')}</span><span class="sub" style="margin:0">${x.length} cheque${x.length>1?'s':''}</span></span><span class="num" style="font-weight:700">${money(sumar(x))}</span></button>${ab?x.map(itemCheque).join(''):''}`}).join('')}</div>`
-      :'<div class="empty">No hay cheques en esta lista. Se cargan desde "Cargar", eligiendo Cheque o Echeq como medio de pago.</div>'}`;
+      ${l.length?`<div class="list">${Object.entries(porMes).map(([m,x])=>{const ab=grupoAb(m),rj=m==='_venc';return `<button data-chm="${ag+m}" class="row" style="width:100%;border:0;border-bottom:1px solid var(--line);border-radius:0;background:${rj?'var(--danger-bg)':'#fafbfc'};align-items:center"><span style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span style="width:14px;color:var(--muted)">${ab?'▾':'▸'}</span>${grupoTit(m,x)}</span><span class="num" style="font-weight:700;${rj?'color:var(--danger)':''}">${money(sumar(x))}</span></button>${ab?x.map(itemCheque).join(''):''}`}).join('')}</div>`
+      :f==='venc'?'<div class="empty">No hay cheques vencidos sin debitar.</div>':'<div class="empty">No hay cheques en esta lista. Se cargan desde "Cargar", eligiendo Cheque o Echeq como medio de pago.</div>'}`;
   }else{
     const base=new Date();const m0=new Date(base.getFullYear(),base.getMonth()+S.calOffset,1),m1=new Date(m0.getFullYear(),m0.getMonth()+1,0);
     const desde=iso(m0),hasta=iso(m1);
@@ -1320,7 +1344,7 @@ function vAgenda(){
   document.querySelectorAll('[data-am]').forEach(b=>b.onclick=()=>{S.agModo=b.dataset.am;render()});
   document.querySelectorAll('[data-chf]').forEach(b=>b.onclick=()=>{S.chFiltro=b.dataset.chf;render()});
   document.querySelectorAll('[data-cha]').forEach(b=>b.onclick=()=>{S.chAgrupa=b.dataset.cha;render()});
-  document.querySelectorAll('[data-chm]').forEach(b=>b.onclick=()=>{S.chMesAb=S.chMesAb||{};S.chMesAb[b.dataset.chm]=!S.chMesAb[b.dataset.chm];render()});
+  document.querySelectorAll('[data-chm]').forEach(b=>b.onclick=()=>{S.chMesAb=S.chMesAb||{};const k=b.dataset.chm;S.chMesAb[k]=!(k in S.chMesAb?S.chMesAb[k]:k.endsWith('_venc'));render()});
   document.querySelectorAll('[data-pmm]').forEach(b=>b.onclick=()=>{S.pmAb=S.pmAb||{};S.pmAb[b.dataset.pmm]=!S.pmAb[b.dataset.pmm];render()});
   if(modo==='prono'){bindProno();bindConfirmar()}
   S.diasAb=S.diasAb||{};
