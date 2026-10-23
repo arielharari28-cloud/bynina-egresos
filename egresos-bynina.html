@@ -50,6 +50,14 @@ table.lg .l{text-align:left}
 table.lg tr{cursor:pointer}
 table.lg td.h{color:var(--ok)}
 .banner{background:var(--danger-bg);color:var(--danger);border:1px solid #f3c6c1;border-radius:12px;padding:12px;margin-bottom:12px;display:flex;justify-content:space-between;gap:10px;align-items:center;font-size:14px}
+.bell{position:relative;border:1px solid var(--line);background:#fff;border-radius:999px;width:36px;height:36px;font-size:16px;padding:0;margin-right:8px}
+.bell .bdg{position:absolute;top:-4px;right:-4px;min-width:18px;height:18px;border-radius:9px;background:var(--danger);color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 4px}
+.actp{position:fixed;top:calc(58px + env(safe-area-inset-top,0px));right:8px;width:360px;max-width:calc(100vw - 16px);max-height:70vh;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.15);z-index:20;display:flex;flex-direction:column;overflow:hidden}
+.actp .ah{padding:12px 14px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:8px}
+.actp .al{overflow-y:auto;flex:1}
+.actp .ai{padding:10px 14px;border-bottom:1px solid var(--line);font-size:13px;line-height:1.4}
+.actp .ai.nl{background:var(--accent-bg)}
+.actp .af{padding:10px 14px;border-top:1px solid var(--line)}
 .banner.soft{background:var(--warn-bg);color:var(--warn);border-color:#f0d9bf}
 .modal-bg{position:fixed;inset:0;background:rgba(20,25,35,.45);z-index:20;display:flex;align-items:flex-end;justify-content:center}
 .modal{background:var(--bg);width:100%;max-width:640px;max-height:92vh;overflow:auto;border-radius:16px 16px 0 0;padding:16px 16px calc(16px + env(safe-area-inset-bottom,0px))}
@@ -174,7 +182,7 @@ function iniciarDatos(){
   db.ref('fabrica_v5/logistica/items').on('value',s=>{S.logi=s.val()||{};S.logiOk=true;if(S.view==='fact'||S.view==='cuentas'||S.view==='traer')render()});
   // Rollos de tela de fábrica: las devoluciones al proveedor que carga Ariel en Telas se descuentan acá.
   db.ref('fabrica_v5/telas_stock/rollos').on('value',s=>{S.rollos=s.val()||{};S.rollosOk=true;if(S.view==='cuentas'||S.view==='devtela')render()});
-  db.ref(ROOT+'/log').limitToLast(1000).on('value',s=>{S.log=s.val()||{};if(S.view==='hist')render()});
+  db.ref(ROOT+'/log').limitToLast(1000).on('value',s=>{S.log=s.val()||{};if(S.view==='hist'||isAdmin())render()});
 }
 
 // ---------- login ----------
@@ -203,13 +211,13 @@ function render(){
   const nFact=factPendientes().length+devGrupos().length;
   const tabs=[['cargar','Cargar'],['agenda','Agenda'],['mov','Movim.'],['cuentas','Cuentas'+(nFact?` <span class="pill p-pend" style="padding:1px 6px">${nFact}</span>`:'')],['rep','Reportes'],['ajustes','Ajustes']].filter(([k])=>isAdmin()||k!=='rep');
   if(!isAdmin()&&S.view==='rep')S.view='cargar';
-  $('#app').innerHTML=`<header><h1>Egresos By Nina</h1><span class="u">${USERS[S.user].nombre} · <a href="#" id="salir" style="color:inherit">Salir</a></span></header>
+  $('#app').innerHTML=`<header><h1>Egresos By Nina</h1><span class="u" style="display:flex;align-items:center">${actBell()}${USERS[S.user].nombre} · <a href="#" id="salir" style="color:inherit;margin-left:4px">Salir</a></span></header>${actPanel()}
   <div class="wrap">${bannerBackup()}${borradosHtml()}${S.view==='agenda'&&S.agModo==='prono'?'':confirmarFijosHtml(false)}<div id="vista"></div></div>
   <nav>${tabs.map(([k,t])=>`<button data-v="${k}" class="${S.view===k||(k==='cuentas'&&(S.view==='fact'||S.view==='traer'||S.view==='devtela'))?'on':''}">${t}</button>`).join('')}</nav>`;
   $('#salir').onclick=e=>{e.preventDefault();localStorage.removeItem('egr_user');S.user=null;render()};
   document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{S.view=b.dataset.v;if(b.dataset.v!=='cuentas')S.cuentaAbierta=null;window.scrollTo(0,0);render()});
   const bb=$('#bkbtn');if(bb)bb.onclick=descargarBackup;
-  bindBorrados();bindConfirmar();
+  bindBorrados();bindConfirmar();bindAct();
   ({hist:vHist,fact:vFact,traer:vTraer,devtela:vDevTela,cargar:vCargar,agenda:vAgenda,mov:vMov,cuentas:vCuentas,rep:vRep,ajustes:vAjustes})[S.view]();
 }
 
@@ -269,6 +277,34 @@ function vHist(){
     if(h.tipo==='egreso'&&h.antes.venc)await db.ref(ROOT+'/ocurrencias/'+h.antes.venc.prog+'/'+h.antes.venc.k).update({pagado:true,egresoId:h.refId,pagadoFecha:h.antes.fecha});
     await db.ref(ROOT+'/log/'+b.dataset.rest).update({restaurado:true});
     await logAcc('restaurar',h.tipo,h.refId,h.resumen);toast('Restaurado')});
+}
+
+// ---------- CAMPANITA DE ACTIVIDAD (oct 2026) ----------
+// Solo para Ariel: arriba a la derecha, lo que hizo Meli (agendó un pago, cargó un cheque, editó, pidió borrar…).
+// Lo no leído se cuenta desde la última vez que tocó "Marcar todo leído" (config/actVisto/{user}, igual en cualquier dispositivo).
+const ACT_DIAS=7;
+function actLista(){return Object.entries(S.log||{}).map(([id,x])=>({id,...x})).filter(x=>x.user&&USERS[x.user]&&!USERS[x.user].admin).sort((a,b)=>b.ts-a.ts)}
+const actVisto=()=>(S.cfg&&S.cfg.actVisto&&S.cfg.actVisto[S.user])||0;
+function actNoLeidas(){const v=Math.max(actVisto(),Date.now()-ACT_DIAS*86400000);return actLista().filter(x=>x.ts>v).length}
+function actTxt(x){
+  let t=TIPO_TXT[x.tipo]??esc(x.tipo);
+  if(x.tipo==='egreso'&&/cheque/i.test(x.resumen||''))t=/^\d+ cheques/.test(x.resumen||'')?'cheques':'un cheque';
+  return `<b>${esc(USERS[x.user]?.nombre||x.user)}</b> ${ACC_TXT[x.accion]||x.accion} ${t}`;
+}
+function actBell(){if(!isAdmin())return '';const n=actNoLeidas();
+  return `<button class="bell" id="actb" title="Actividad de Meli">🔔${n?`<span class="bdg">${n>99?'99+':n}</span>`:''}</button>`}
+function actPanel(){if(!isAdmin()||!S.actOpen)return '';
+  const v=actVisto(),l=actLista().slice(0,60);
+  const cuando=ts=>{const d=new Date(ts),k=iso(d);return (k===hoy()?'Hoy':d.toLocaleDateString('es-AR',{weekday:'short',day:'numeric',month:'numeric'}))+' '+hora(ts)};
+  return `<div class="actp" id="actp"><div class="ah"><b style="font-size:14px">Actividad de Meli</b>${actNoLeidas()?'<button id="actleido" style="padding:5px 10px;font-size:12px">Marcar todo leído</button>':''}</div>
+  <div class="al">${l.length?l.map(x=>`<div class="ai ${x.ts>v&&x.ts>Date.now()-ACT_DIAS*86400000?'nl':''}"><div style="display:flex;justify-content:space-between;gap:8px"><span>${actTxt(x)}</span><span class="sub num" style="white-space:nowrap">${cuando(x.ts)}</span></div>
+    ${x.resumen?`<div class="sub">${esc(x.resumen)}</div>`:''}${x.cambios&&x.cambios.length?`<div style="margin-top:2px">${x.cambios.map(c=>esc(c)).join('<br>')}</div>`:''}</div>`).join(''):'<div class="empty">Todavía no hay movimientos de Meli.</div>'}</div>
+  <div class="af"><button id="acthist" style="width:100%">Ver historial completo</button></div></div>`}
+function bindAct(){
+  const b=$('#actb');if(b)b.onclick=e=>{e.stopPropagation();S.actOpen=!S.actOpen;render()};
+  const m=$('#actleido');if(m)m.onclick=async e=>{e.stopPropagation();await db.ref(ROOT+'/config/actVisto/'+S.user).set(Date.now())};
+  const hh=$('#acthist');if(hh)hh.onclick=()=>{S.actOpen=false;S.view='hist';S.hUser='meli';S.hLim=100;window.scrollTo(0,0);render()};
+  const p=$('#actp');if(p){p.onclick=e=>e.stopPropagation();setTimeout(()=>document.addEventListener('click',function c(){document.removeEventListener('click',c);if(S.actOpen){S.actOpen=false;render()}},{once:true}),0)}
 }
 
 // ---------- CARGAR / EDITAR EGRESO ----------
