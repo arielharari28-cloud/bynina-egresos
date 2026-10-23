@@ -50,6 +50,11 @@ table.lg .l{text-align:left}
 table.lg tr{cursor:pointer}
 table.lg td.h{color:var(--ok)}
 .banner{background:var(--danger-bg);color:var(--danger);border:1px solid #f3c6c1;border-radius:12px;padding:12px;margin-bottom:12px;display:flex;justify-content:space-between;gap:10px;align-items:center;font-size:14px}
+.avb{display:inline-flex;align-items:center;gap:6px;background:#f6dcd3;color:#7a2e1a;border:0;border-radius:999px;padding:9px 16px;font-weight:700;font-size:14px;margin-bottom:10px}
+.avl{background:#fff;border:1px solid var(--line);border-radius:12px;padding:4px 14px;margin-bottom:14px}
+.avi{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--line);font-size:14px;line-height:1.4}
+.avi:last-child{border-bottom:0}
+.avv{background:var(--ok-bg);color:var(--ok);border:0;border-radius:10px;padding:7px 12px;font-weight:700;font-size:13px;white-space:nowrap}
 .bell{position:relative;border:1px solid var(--line);background:#fff;border-radius:999px;width:36px;height:36px;font-size:16px;padding:0;margin-right:8px}
 .bell .bdg{position:absolute;top:-4px;right:-4px;min-width:18px;height:18px;border-radius:9px;background:var(--danger);color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 4px}
 .actp{position:fixed;top:calc(58px + env(safe-area-inset-top,0px));right:8px;width:360px;max-width:calc(100vw - 16px);max-height:70vh;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.15);z-index:20;display:flex;flex-direction:column;overflow:hidden}
@@ -211,8 +216,8 @@ function render(){
   const nFact=factPendientes().length+devGrupos().length;
   const tabs=[['cargar','Cargar'],['agenda','Agenda'],['mov','Movim.'],['cuentas','Cuentas'+(nFact?` <span class="pill p-pend" style="padding:1px 6px">${nFact}</span>`:'')],['rep','Reportes'],['ajustes','Ajustes']].filter(([k])=>isAdmin()||k!=='rep');
   if(!isAdmin()&&S.view==='rep')S.view='cargar';
-  $('#app').innerHTML=`<header><h1>Egresos By Nina</h1><span class="u" style="display:flex;align-items:center">${actBell()}${USERS[S.user].nombre} · <a href="#" id="salir" style="color:inherit;margin-left:4px">Salir</a></span></header>${actPanel()}
-  <div class="wrap">${bannerBackup()}${borradosHtml()}${S.view==='agenda'&&S.agModo==='prono'?'':confirmarFijosHtml(false)}<div id="vista"></div></div>
+  $('#app').innerHTML=`<header><h1>Egresos By Nina</h1><span class="u">${USERS[S.user].nombre} · <a href="#" id="salir" style="color:inherit">Salir</a></span></header>
+  <div class="wrap">${actAvisos()}${bannerBackup()}${borradosHtml()}${S.view==='agenda'&&S.agModo==='prono'?'':confirmarFijosHtml(false)}<div id="vista"></div></div>
   <nav>${tabs.map(([k,t])=>`<button data-v="${k}" class="${S.view===k||(k==='cuentas'&&(S.view==='fact'||S.view==='traer'||S.view==='devtela'))?'on':''}">${t}</button>`).join('')}</nav>`;
   $('#salir').onclick=e=>{e.preventDefault();localStorage.removeItem('egr_user');S.user=null;render()};
   document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{S.view=b.dataset.v;if(b.dataset.v!=='cuentas')S.cuentaAbierta=null;window.scrollTo(0,0);render()});
@@ -279,32 +284,32 @@ function vHist(){
     await logAcc('restaurar',h.tipo,h.refId,h.resumen);toast('Restaurado')});
 }
 
-// ---------- CAMPANITA DE ACTIVIDAD (oct 2026) ----------
-// Solo para Ariel: arriba a la derecha, lo que hizo Meli (agendó un pago, cargó un cheque, editó, pidió borrar…).
-// Lo no leído se cuenta desde la última vez que tocó "Marcar todo leído" (config/actVisto/{user}, igual en cualquier dispositivo).
+// ---------- AVISOS DE ACTIVIDAD (oct 2026) ----------
+// Solo para Ariel, arriba de todo: "N avisos nuevos — tocá para ver" con lo que hizo Meli
+// (agendó un pago, cargó un cheque, editó, pidió borrar…). Cada aviso se marca "✓ Visto" de a uno o todos juntos.
+// Visto se guarda en config/actVisto/{user} (hasta: ts de "todo visto"; ids: vistos sueltos) → igual en cualquier dispositivo.
 const ACT_DIAS=7;
 function actLista(){return Object.entries(S.log||{}).map(([id,x])=>({id,...x})).filter(x=>x.user&&USERS[x.user]&&!USERS[x.user].admin).sort((a,b)=>b.ts-a.ts)}
-const actVisto=()=>(S.cfg&&S.cfg.actVisto&&S.cfg.actVisto[S.user])||0;
-function actNoLeidas(){const v=Math.max(actVisto(),Date.now()-ACT_DIAS*86400000);return actLista().filter(x=>x.ts>v).length}
+const actV=()=>(S.cfg&&S.cfg.actVisto&&S.cfg.actVisto[S.user])||{};
+function actNuevos(){const v=actV(),desde=Math.max(Number(v.hasta)||0,Date.now()-ACT_DIAS*86400000),ids=v.ids||{};return actLista().filter(x=>x.ts>desde&&!ids[x.id])}
 function actTxt(x){
   let t=TIPO_TXT[x.tipo]??esc(x.tipo);
   if(x.tipo==='egreso'&&/cheque/i.test(x.resumen||''))t=/^\d+ cheques/.test(x.resumen||'')?'cheques':'un cheque';
-  return `<b>${esc(USERS[x.user]?.nombre||x.user)}</b> ${ACC_TXT[x.accion]||x.accion} ${t}`;
+  return `${esc(USERS[x.user]?.nombre||x.user)} ${ACC_TXT[x.accion]||x.accion} ${t}`;
 }
-function actBell(){if(!isAdmin())return '';const n=actNoLeidas();
-  return `<button class="bell" id="actb" title="Actividad de Meli">🔔${n?`<span class="bdg">${n>99?'99+':n}</span>`:''}</button>`}
-function actPanel(){if(!isAdmin()||!S.actOpen)return '';
-  const v=actVisto(),l=actLista().slice(0,60);
-  const cuando=ts=>{const d=new Date(ts),k=iso(d);return (k===hoy()?'Hoy':d.toLocaleDateString('es-AR',{weekday:'short',day:'numeric',month:'numeric'}))+' '+hora(ts)};
-  return `<div class="actp" id="actp"><div class="ah"><b style="font-size:14px">Actividad de Meli</b>${actNoLeidas()?'<button id="actleido" style="padding:5px 10px;font-size:12px">Marcar todo leído</button>':''}</div>
-  <div class="al">${l.length?l.map(x=>`<div class="ai ${x.ts>v&&x.ts>Date.now()-ACT_DIAS*86400000?'nl':''}"><div style="display:flex;justify-content:space-between;gap:8px"><span>${actTxt(x)}</span><span class="sub num" style="white-space:nowrap">${cuando(x.ts)}</span></div>
-    ${x.resumen?`<div class="sub">${esc(x.resumen)}</div>`:''}${x.cambios&&x.cambios.length?`<div style="margin-top:2px">${x.cambios.map(c=>esc(c)).join('<br>')}</div>`:''}</div>`).join(''):'<div class="empty">Todavía no hay movimientos de Meli.</div>'}</div>
-  <div class="af"><button id="acthist" style="width:100%">Ver historial completo</button></div></div>`}
+const ACT_ICO={crear:'🆕',editar:'✏️',borrar:'🗑️',pedirBorrado:'🗑️',bajado:'✅',debitado:'✅',reprogramar:'📅',omitir:'⏭️'};
+function actAvisos(){if(!isAdmin())return '';const l=actNuevos();if(!l.length)return '';
+  const cuando=ts=>{const d=new Date(ts);return (iso(d)===hoy()?'Hoy':d.toLocaleDateString('es-AR',{weekday:'short',day:'numeric',month:'numeric'}))+' '+hora(ts)};
+  return `<button class="avb" id="avb">🔔 ${l.length} aviso${l.length>1?'s':''} nuevo${l.length>1?'s':''} de Meli — ${S.actOpen?'ocultar':'tocá para ver'}</button>
+  ${S.actOpen?`<div class="avl">${l.map(x=>`<div class="avi"><div>${ACT_ICO[x.accion]||'•'} ${actTxt(x)}${x.resumen?`: ${esc(x.resumen)}`:''}
+    ${x.cambios&&x.cambios.length?`<div class="sub">${x.cambios.map(c=>esc(c)).join('<br>')}</div>`:''}<div class="sub">${cuando(x.ts)}</div></div>
+    <button class="avv" data-avv="${x.id}">✓ Visto</button></div>`).join('')}
+    <div style="display:flex;gap:8px;padding:10px 0"><button id="avtodo" style="flex:1">✓ Marcar todo visto</button><button id="avhist" style="flex:1">Historial completo</button></div></div>`:''}`}
 function bindAct(){
-  const b=$('#actb');if(b)b.onclick=e=>{e.stopPropagation();S.actOpen=!S.actOpen;render()};
-  const m=$('#actleido');if(m)m.onclick=async e=>{e.stopPropagation();await db.ref(ROOT+'/config/actVisto/'+S.user).set(Date.now())};
-  const hh=$('#acthist');if(hh)hh.onclick=()=>{S.actOpen=false;S.view='hist';S.hUser='meli';S.hLim=100;window.scrollTo(0,0);render()};
-  const p=$('#actp');if(p){p.onclick=e=>e.stopPropagation();setTimeout(()=>document.addEventListener('click',function c(){document.removeEventListener('click',c);if(S.actOpen){S.actOpen=false;render()}},{once:true}),0)}
+  const b=$('#avb');if(b)b.onclick=()=>{S.actOpen=!S.actOpen;render()};
+  document.querySelectorAll('[data-avv]').forEach(x=>x.onclick=()=>db.ref(ROOT+'/config/actVisto/'+S.user+'/ids/'+x.dataset.avv).set(true));
+  const t=$('#avtodo');if(t)t.onclick=()=>{S.actOpen=false;db.ref(ROOT+'/config/actVisto/'+S.user).set({hasta:Date.now()})};
+  const hh=$('#avhist');if(hh)hh.onclick=()=>{S.actOpen=false;S.view='hist';S.hUser='meli';S.hLim=100;window.scrollTo(0,0);render()};
 }
 
 // ---------- CARGAR / EDITAR EGRESO ----------
