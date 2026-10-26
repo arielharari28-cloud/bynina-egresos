@@ -112,7 +112,7 @@ const DEFAULT_CATS=['Talleres','Tela','Producto terminado','Avíos','Sueldos y v
 const DEFAULT_MEDIOS=['Efectivo local','Transferencia','Echeq','Tarjeta'];
 
 let S={user:localStorage.getItem('egr_user')||null,view:'cargar',cfg:null,cuentas:{},egresos:{},cargos:{},
-  movFiltro:'todos',movBusca:'',movLimite:150,cuentaTipo:'Talleres',cuentaAbierta:null,repModo:'semana',repOffset:0,draft:null,programados:{},ocurr:{},calOffset:0,calSel:null,log:{},hUser:'todos',hAcc:'todo',hLim:100,logi:{},rollos:{},devMonto:{},devCot:{}};
+  movFiltro:'todos',movBusca:'',movLimite:150,cuentaTipo:'Talleres',cuentaAbierta:null,repModo:'semana',repOffset:0,draft:null,programados:{},ocurr:{},calOffset:0,calSel:null,log:{},hUser:'todos',hAcc:'todo',hLim:100,logi:{},rollos:{},devMonto:{},devCot:{},remitosFab:{},remitosOk:false,ingFab:{},ingFabOk:false,ingMonto:{},ingCot:{},ingFact:{}};
 
 // ---------- utilidades ----------
 const $=s=>document.querySelector(s);
@@ -187,6 +187,9 @@ function iniciarDatos(){
   db.ref('fabrica_v5/logistica/items').on('value',s=>{S.logi=s.val()||{};S.logiOk=true;if(S.view==='fact'||S.view==='cuentas'||S.view==='traer')render()});
   // Rollos de tela de fábrica: las devoluciones al proveedor que carga Ariel en Telas se descuentan acá.
   db.ref('fabrica_v5/telas_stock/rollos').on('value',s=>{S.rollos=s.val()||{};S.rollosOk=true;if(S.view==='cuentas'||S.view==='devtela')render()});
+  // Ingresos de fábrica que carga Noelia (remitos de tela y avíos): Meli los confirma contra la factura y suman a la cuenta.
+  db.ref('fabrica_v5/telas_stock/remitos').on('value',s=>{S.remitosFab=s.val()||{};S.remitosOk=true;render()});
+  db.ref('fabrica_v5/ingresos').on('value',s=>{S.ingFab=s.val()||{};S.ingFabOk=true;render()});
   db.ref(ROOT+'/log').limitToLast(1000).on('value',s=>{S.log=s.val()||{};if(S.view==='hist'||isAdmin())render()});
 }
 
@@ -213,17 +216,17 @@ function renderLogin(){
 function render(){
   if(!S.user||!USERS[S.user]){renderLogin();return}
   if(!S.cfg){$('#app').innerHTML='<div class="empty">Cargando…</div>';return}
-  const nFact=factPendientes().length+devGrupos().length;
+  const nFact=factPendientes().length+devGrupos().length+ingPend().length;
   const tabs=[['cargar','Cargar'],['agenda','Agenda'],['mov','Movim.'],['cuentas','Cuentas'+(nFact?` <span class="pill p-pend" style="padding:1px 6px">${nFact}</span>`:'')],['rep','Reportes'],['ajustes','Ajustes']].filter(([k])=>isAdmin()||k!=='rep');
   if(!isAdmin()&&S.view==='rep')S.view='cargar';
   $('#app').innerHTML=`<header><h1>Egresos By Nina</h1><span class="u">${USERS[S.user].nombre} · <a href="#" id="salir" style="color:inherit">Salir</a></span></header>
   <div class="wrap">${actAvisos()}${bannerBackup()}${borradosHtml()}${S.view==='agenda'&&S.agModo==='prono'?'':confirmarFijosHtml(false)}<div id="vista"></div></div>
-  <nav>${tabs.map(([k,t])=>`<button data-v="${k}" class="${S.view===k||(k==='cuentas'&&(S.view==='fact'||S.view==='traer'||S.view==='devtela'))?'on':''}">${t}</button>`).join('')}</nav>`;
+  <nav>${tabs.map(([k,t])=>`<button data-v="${k}" class="${S.view===k||(k==='cuentas'&&(S.view==='fact'||S.view==='traer'||S.view==='devtela'||S.view==='ingfab'))?'on':''}">${t}</button>`).join('')}</nav>`;
   $('#salir').onclick=e=>{e.preventDefault();localStorage.removeItem('egr_user');S.user=null;render()};
   document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{S.view=b.dataset.v;if(b.dataset.v!=='cuentas')S.cuentaAbierta=null;window.scrollTo(0,0);render()});
   const bb=$('#bkbtn');if(bb)bb.onclick=descargarBackup;
   bindBorrados();bindConfirmar();bindAct();
-  ({hist:vHist,fact:vFact,traer:vTraer,devtela:vDevTela,cargar:vCargar,agenda:vAgenda,mov:vMov,cuentas:vCuentas,rep:vRep,ajustes:vAjustes})[S.view]();
+  ({hist:vHist,fact:vFact,traer:vTraer,devtela:vDevTela,ingfab:vIngFab,cargar:vCargar,agenda:vAgenda,mov:vMov,cuentas:vCuentas,rep:vRep,ajustes:vAjustes})[S.view]();
 }
 
 function diasDesdeBackup(){const b=S.cfg?.ultimoBackup?.fecha;if(!b)return Infinity;return Math.floor((Date.now()-new Date(b).getTime())/86400000)}
@@ -443,6 +446,9 @@ const RUTA_BORR={egreso:'egresos',cargo:'cargos',programado:'programados'};
 async function ejecBorrarEgreso(id){const antes=S.egresos[id];if(!antes)return null;await db.ref(ROOT+'/egresos/'+id).remove();logAcc('borrar','egreso',id,resEg(antes),{antes});
   if(antes.venc)await db.ref(ROOT+'/ocurrencias/'+antes.venc.prog+'/'+antes.venc.k).update({pagado:null,egresoId:null,pagadoFecha:null});return antes.venc||null}
 async function ejecBorrarCargo(id){const antes=S.cargos[id];if(!antes)return;
+  if(antes.ingresoFab){const f=antes.ingresoFab,base=f.fuente==='remito'?'fabrica_v5/telas_stock/remitos/':'fabrica_v5/ingresos/';
+    await db.ref().update({[ROOT+'/cargos/'+id]:null,[base+f.id+'/egresos_cargo_id']:null,[base+f.id+'/egresos_factura']:null,[base+f.id+'/egresos_ts']:null});
+    logAcc('borrar','ingreso de fábrica',id,`${ctaNom(antes.cuenta)} · ${antes.desc} · ${money(antes.monto,monCta(antes.cuenta))} · vuelve a ingresos para confirmar`,{antes});return}
   if(antes.devRollos){const up={[ROOT+'/cargos/'+id]:null};Object.keys(antes.devRollos).forEach(rid=>{if(S.rollos[rid]&&S.rollos[rid].devolucion)up[`fabrica_v5/telas_stock/rollos/${rid}/devolucion/egresos_cargo_id`]=null});await db.ref().update(up);logAcc('borrar','descuento',id,`${ctaNom(antes.cuenta)} · ${antes.desc} · ${money(antes.monto,monCta(antes.cuenta))} · la devolución vuelve a pendientes`,{antes});return}
   if(antes.logiId&&antes.traspaso==='fabrica'){const up={[ROOT+'/cargos/'+id]:null,[`fabrica_v5/logistica/items/${antes.logiId}/egresos_cargo_id`]:null,[`fabrica_v5/logistica/items/${antes.logiId}/egresos_traspasado`]:null};await db.ref().update(up);logAcc('borrar','corte traspasado',antes.logiId,`${ctaNom(antes.cuenta)} · ${antes.desc} · ${money(antes.monto)}`,{antes});return}
   if(antes.logiId){const up={[ROOT+'/cargos/'+id]:null};['facturado_cta_cte','facturacion_monto','facturacion_fecha','facturacion_fecha_registro','facturacion_registrado_por','facturacion_en','egresos_cargo_id'].forEach(k=>up[`fabrica_v5/logistica/items/${antes.logiId}/${k}`]=null);await db.ref().update(up);logAcc('desfacturar','corte',antes.logiId,`${ctaNom(antes.cuenta)} · ${antes.desc} · ${money(antes.monto)}`,{antes});return}
@@ -609,6 +615,10 @@ function vCuentas(){
   $('#vista').innerHTML=`${fp.length?`<button id="irfact" class="card" style="width:100%;text-align:left;display:flex;justify-content:space-between;align-items:center;gap:10px;border-color:#f59e0b;background:#fffbeb">
     <span><b>🧾 ${fp.length} corte${fp.length!==1?'s':''} finalizado${fp.length!==1?'s':''} para facturar</b><span class="sub" style="display:block;margin:2px 0 0">${fsp?fsp+' sin precio · ':''}tocá para revisar y facturar</span></span>
     <span class="num" style="font-weight:700">${money(fp.reduce((a,[,it])=>a+factMonto(it),0))}</span></button>`:''}
+  ${(()=>{const l=ingPend();if(!l.length)return'';const tot={};l.forEach(x=>{if(x.total>0)tot[x.moneda]=(tot[x.moneda]||0)+x.total});
+    return `<button id="iring" class="card" style="width:100%;text-align:left;display:flex;justify-content:space-between;align-items:center;gap:10px;border-color:#f59e0b;background:#fffbeb">
+    <span><b>📥 ${l.length} ingreso${l.length!==1?'s':''} de fábrica para confirmar</b><span class="sub" style="display:block;margin:2px 0 0">Tela y avíos que cargó Noelia · tocá para revisar con la factura</span></span>
+    <span class="num" style="font-weight:700">${Object.entries(tot).map(([m,v])=>money(v,m)).join(' + ')||'—'}</span></button>`})()}
   ${(()=>{const g=devGrupos();if(!g.length)return'';const tot={};g.forEach(x=>{tot[x.moneda]=(tot[x.moneda]||0)+x.importe});
     return `<button id="irdev" class="card" style="width:100%;text-align:left;display:flex;justify-content:space-between;align-items:center;gap:10px;border-color:#f59e0b;background:#fffbeb">
     <span><b>↩ ${g.reduce((a,x)=>a+x.rollos.length,0)} devolución${g.reduce((a,x)=>a+x.rollos.length,0)!==1?'es':''} de tela para descontar</b><span class="sub" style="display:block;margin:2px 0 0">${g.length} remito${g.length!==1?'s':''} · tocá para descontar de la cuenta del proveedor</span></span>
@@ -622,6 +632,7 @@ function vCuentas(){
   document.querySelectorAll('[data-c]').forEach(x=>x.onclick=()=>{S.cuentaAbierta=x.dataset.c;window.scrollTo(0,0);render()});
   const irf=$('#irfact');if(irf)irf.onclick=()=>{S.view='fact';window.scrollTo(0,0);render()};
   const ird=$('#irdev');if(ird)ird.onclick=()=>{S.view='devtela';window.scrollTo(0,0);render()};
+  const iri=$('#iring');if(iri)iri.onclick=()=>{S.view='ingfab';window.scrollTo(0,0);render()};
   const irt=$('#irtraer');if(irt)irt.onclick=e=>{e.preventDefault();S.view='traer';window.scrollTo(0,0);render()};
 }
 function vLedger(cid){
@@ -934,6 +945,73 @@ function vDevTela(){
     up[ROOT+'/cargos/'+nid]={cuenta:cid,fecha:hoy(),desc:descBase,descBase,codigo:null,cantidad:null,precio:null,monto,lado:'haber',motivo:'Devolución de mercadería',devRollos,creadoPor:S.user,ts:Date.now()};
     await db.ref().update(up);delete S.devMonto[g.k];
     logAcc('crear','descuento',nid,`${ctaNom(cid)} · Devolución de mercadería · ${descBase} · ${money(monto,mc)}`);toast('Devolución descontada')});
+}
+
+// ---------- INGRESOS DE FÁBRICA (tela y avíos que carga Noelia en la app de fábrica) ----------
+// Remitos de tela (fabrica_v5/telas_stock/remitos) y avíos recibidos (fabrica_v5/ingresos). Meli los compara con la
+// factura, corrige el monto si hace falta y los suma al "debe" de la cuenta del proveedor. Si después borra ese cargo,
+// el ingreso vuelve a esta lista. Las entregas de talleres y la prenda de proveedor siguen por "Cortes para facturar".
+const ING_DESDE=new Date('2026-10-26T00:00:00-03:00').getTime();
+function ingPend(){const out=[];
+  Object.entries(S.remitosFab||{}).forEach(([id,r])=>{if(!r||r.inicial||r.egresos_cargo_id||r.egresos_omitido||(r.creadoEn||0)<ING_DESDE)return;
+    const u=r.unidad==='m'?'m':'kg';
+    out.push({k:'r|'+id,fuente:'remito',id,tipo:'Tela',proveedor:r.proveedor||'Sin proveedor',remito:r.numero||'',moneda:r.moneda||'ARS',total:Number(r.importe)||0,fecha:r.fecha||'',por:r.creadoPor||'',
+      detalle:`${r.tela||''} · ${r.rollos||0} rollo${r.rollos!==1?'s':''} · ${(Number(r.cantidad)||0).toLocaleString('es-AR')} ${u} × ${money(r.precio,r.moneda||'ARS')}`,motivo:'Compra de tela'})});
+  Object.entries(S.ingFab||{}).forEach(([id,x])=>{if(!x||x.egresos_cargo_id||x.egresos_omitido)return;
+    out.push({k:'i|'+id,fuente:'ingreso',id,tipo:x.tipo||'Avío',proveedor:x.proveedor||'Sin proveedor',remito:x.remito||'',moneda:x.moneda||'ARS',total:Number(x.total)||0,fecha:x.fecha||'',por:x.por||'',
+      detalle:[x.detalle,x.cantidad?`${Number(x.cantidad).toLocaleString('es-AR')} u${Number(x.precio)>0?' × '+money(x.precio,x.moneda||'ARS'):''}`:''].filter(Boolean).join(' · '),motivo:x.tipo==='Avío'?'Compra de avíos':'Compra de mercadería'})});
+  return out.sort((a,b)=>String(a.fecha).localeCompare(String(b.fecha)))}
+function vIngFab(){
+  const l=ingPend();
+  const ctasCC=Object.entries(S.cuentas).filter(([,c])=>c.activo!==false&&c.llevaCC).sort((a,b)=>(a[1].tipo==='Proveedores'?0:1)-(b[1].tipo==='Proveedores'?0:1)||a[1].nombre.localeCompare(b[1].nombre));
+  const quien=u=>({noelia:'Noelia',ariel:'Ariel',peque:'Peque'})[u]||u||'';
+  const cards=l.map(g=>{const cid=ctaDeProvTela(g.proveedor),mc=cid?monCta(cid):null,otra=cid&&mc!==g.moneda;
+    const monto=S.ingMonto[g.k]!=null?S.ingMonto[g.k]:Math.round(g.total*100)/100;
+    const vinc=cid?`<span class="sub" style="margin:0">→ cuenta <b>${esc(ctaNom(cid))}</b>${mc==='USD'?' (en dólares)':''} · <a href="#" data-idesv="${esc(g.proveedor)}" style="color:inherit">cambiar</a></span>`
+      :`<select data-ivinc="${esc(g.proveedor)}" style="max-width:260px"><option value="">Elegí la cuenta de este proveedor…</option>${ctasCC.map(([id,c])=>`<option value="${id}">${esc(c.nombre)} · ${esc(c.tipo)}</option>`).join('')}</select>`;
+    return `<div class="card" style="padding:0;overflow:hidden">
+      <div style="padding:12px 14px;background:#fafbfc;border-bottom:1px solid var(--line)">
+        <div class="hdr"><b style="font-size:16px">${g.tipo==='Tela'?'🧵':'🔘'} ${esc(g.tipo)} · ${esc(g.proveedor)}${g.remito?' · Remito '+esc(g.remito):''}</b><span class="num" style="font-weight:700">${g.total>0?money(g.total,g.moneda):'<span style="color:var(--danger)">sin importe</span>'}</span></div>
+        <div class="sub" style="margin:4px 0 0">${esc(g.detalle)}${g.fecha?' · '+fmtF(g.fecha):''}${g.por?' · cargó '+esc(quien(g.por)):''}</div>
+        <div style="margin-top:6px">${vinc}</div></div>
+      <div style="padding:10px 14px;display:flex;gap:10px;align-items:flex-end;justify-content:flex-end;flex-wrap:wrap">
+        <label style="margin:0;font-size:12px;color:var(--muted)">Factura N°<input data-ifac="${esc(g.k)}" value="${esc(S.ingFact[g.k]||'')}" style="width:110px;display:block"></label>
+        ${otra?`<label style="margin:0;font-size:12px;color:var(--muted)">Cotización US$<input data-icot="${esc(g.k)}" class="num" inputmode="decimal" value="${S.ingCot[g.k]??(TC()||'')}" style="width:90px;display:block"></label>`:''}
+        <label style="margin:0;font-size:12px;color:var(--muted)">Total de la factura${g.moneda==='USD'?' (US$)':''}<input data-imon="${esc(g.k)}" class="num" inputmode="decimal" value="${monto?monto.toLocaleString('es-AR'):''}" style="width:120px;display:block;font-weight:700"></label>
+        <a href="#" data-iomit="${esc(g.k)}" style="font-size:12px;color:var(--muted);margin-bottom:10px">No va a cuenta corriente</a>
+        <button data-iconf="${esc(g.k)}" class="pri" style="padding:8px 12px;font-size:13px" ${cid?'':'disabled'}>Confirmar y sumar a la cuenta</button></div>
+    </div>`}).join('');
+  $('#vista').innerHTML=`<div class="hdr" style="margin-bottom:10px"><button id="ivolver">Volver a cuentas</button></div>
+  <div class="hdr" style="margin-bottom:4px"><span style="font-size:18px;font-weight:700">Ingresos de fábrica para confirmar</span></div>
+  <p class="sub" style="margin-bottom:10px">Remitos de tela y avíos que cargaron en la app de fábrica. Compará con la factura: si el total es otro, corregilo antes de confirmar. Al confirmar queda en el "debe" de la cuenta del proveedor. Si después borrás ese movimiento, vuelve acá. Las entregas de talleres y las prendas de proveedor siguen en "Cortes para facturar".</p>
+  ${!(S.remitosOk&&S.ingFabOk)?'<div class="empty">Cargando ingresos de fábrica…</div>':cards||'<div class="empty">No hay ingresos pendientes de confirmar. 🎉</div>'}`;
+  $('#ivolver').onclick=()=>{S.view='cuentas';render()};
+  document.querySelectorAll('[data-ivinc]').forEach(x=>x.onchange=async()=>{const t=x.dataset.ivinc,cid=x.value;if(!cid)return;
+    await db.ref(ROOT+'/cuentas/'+cid+'/provTela').set(t);logAcc('editar','cuenta',cid,`${ctaNom(cid)} vinculada al proveedor "${t}"`);render()});
+  document.querySelectorAll('[data-idesv]').forEach(a=>a.onclick=async ev=>{ev.preventDefault();const cid=ctaDeProvTela(a.dataset.idesv);if(!cid)return;
+    if(S.cuentas[cid].provTela)await db.ref(ROOT+'/cuentas/'+cid+'/provTela').remove();else await db.ref(ROOT+'/cuentas/'+cid+'/provTela').set('—');render()});
+  document.querySelectorAll('[data-imon]').forEach(x=>x.onchange=()=>{S.ingMonto[x.dataset.imon]=parseMonto(x.value)});
+  document.querySelectorAll('[data-icot]').forEach(x=>x.onchange=()=>{S.ingCot[x.dataset.icot]=parseMonto(x.value)});
+  document.querySelectorAll('[data-ifac]').forEach(x=>x.onchange=()=>{S.ingFact[x.dataset.ifac]=x.value.trim()});
+  const base=g=>g.fuente==='remito'?'fabrica_v5/telas_stock/remitos/':'fabrica_v5/ingresos/';
+  document.querySelectorAll('[data-iomit]').forEach(a=>a.onclick=async ev=>{ev.preventDefault();const g=ingPend().find(x=>x.k===a.dataset.iomit);if(!g)return;
+    if(!confirm(`¿${g.tipo} de ${g.proveedor}${g.remito?' (remito '+g.remito+')':''} no va a cuenta corriente? Por ejemplo, si se pagó en el momento. Sale de esta lista.`))return;
+    await db.ref(base(g)+g.id).update({egresos_omitido:{por:S.user,ts:Date.now()}});
+    logAcc('editar','ingreso de fábrica',g.id,`${g.tipo} · ${g.proveedor}${g.remito?' · Remito '+g.remito:''}: no va a cuenta corriente`)});
+  document.querySelectorAll('[data-iconf]').forEach(b=>b.onclick=async()=>{const g=ingPend().find(x=>x.k===b.dataset.iconf);if(!g)return;
+    const cid=ctaDeProvTela(g.proveedor);if(!cid){toast('Elegí la cuenta del proveedor');return}
+    const mc=monCta(cid),montoOrig=S.ingMonto[g.k]!=null?S.ingMonto[g.k]:Math.round(g.total*100)/100;
+    if(!(montoOrig>0)){toast('Poné el total de la factura');return}
+    let monto=montoOrig;
+    if(mc!==g.moneda){const cot=S.ingCot[g.k]??TC();if(!(cot>0)){toast('Poné la cotización del dólar');return}monto=Math.round(conv(montoOrig,g.moneda,mc,cot)*100)/100}
+    const fac=S.ingFact[g.k]||'';
+    const descBase=`${g.tipo}${g.remito?' · Remito '+g.remito:''}${fac?' · Factura '+fac:''} · ${g.detalle}${mc!==g.moneda?' · '+money(montoOrig,g.moneda):''}${Math.abs(montoOrig-g.total)>0.5&&g.total>0?' · remito decía '+money(g.total,g.moneda):''}`;
+    if(!confirm(`¿Sumar ${money(monto,mc)} a la cuenta ${ctaNom(cid)}?\n\n${descBase}`))return;
+    const nid=uid(),up={};
+    up[ROOT+'/cargos/'+nid]={cuenta:cid,fecha:hoy(),desc:descBase,descBase,codigo:null,cantidad:null,precio:null,monto,lado:'debe',motivo:g.motivo,factura:fac||null,ingresoFab:{fuente:g.fuente,id:g.id},creadoPor:S.user,ts:Date.now()};
+    up[base(g)+g.id+'/egresos_cargo_id']=nid;up[base(g)+g.id+'/egresos_factura']=fac||null;up[base(g)+g.id+'/egresos_ts']=Date.now();
+    await db.ref().update(up);delete S.ingMonto[g.k];delete S.ingFact[g.k];
+    logAcc('crear','ingreso de fábrica',nid,`${ctaNom(cid)} · ${g.motivo} · ${descBase} · ${money(monto,mc)}`);toast('Sumado a la cuenta')});
 }
 
 // ---------- REPORTES ----------
