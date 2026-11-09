@@ -117,7 +117,7 @@ const TIPOS=['Talleres','Empleados','Proveedores','Varios'];
 const DEFAULT_CATS=['Talleres','Tela','Producto terminado','Avíos','Sueldos y vales','Alquiler y servicios','Impuestos','Publicidad','Envíos y logística','Varios'];
 const DEFAULT_MEDIOS=['Efectivo local','Transferencia','Echeq','Tarjeta'];
 
-let S={user:localStorage.getItem('egr_user')||null,view:'cargar',cfg:null,cuentas:{},egresos:{},cargos:{},
+let S={user:localStorage.getItem('egr_user')||null,view:'inicio',cfg:null,cuentas:{},egresos:{},cargos:{},
   movFiltro:'todos',movBusca:'',movLimite:150,cuentaTipo:'Talleres',cuentaAbierta:null,ledFiltro:'todos',reasig:null,reasigSel:[],repModo:'semana',repOffset:0,draft:null,programados:{},ocurr:{},calOffset:0,calSel:null,log:{},hUser:'todos',hAcc:'todo',hLim:100,logi:{},rollos:{},devMonto:{},devCot:{},remitosFab:{},remitosOk:false,ingFab:{},ingFabOk:false,ingMonto:{},ingCot:{},ingFact:{}};
 
 // ---------- utilidades ----------
@@ -190,9 +190,9 @@ function iniciarDatos(){
     if(!v.fuentes){const up={};['Nina Cya - Credicoop','Efectivo local','Mercado Pago'].forEach((n,i)=>up['fuentes/'+uid()]={nombre:n,orden:i,saldo:0});await db.ref(ROOT+'/caja').update(up);return}
     S.caja=v;if(S.view==='agenda'&&S.agModo==='caja')render()});
   // Cortes controlados en Logística (app de fábrica, misma base) para facturar a los talleres desde acá.
-  db.ref('fabrica_v5/logistica/items').on('value',s=>{S.logi=s.val()||{};S.logiOk=true;if(S.view==='fact'||S.view==='cuentas'||S.view==='traer')render()});
+  db.ref('fabrica_v5/logistica/items').on('value',s=>{S.logi=s.val()||{};S.logiOk=true;if(S.view==='inicio'||S.view==='fact'||S.view==='cuentas'||S.view==='traer')render()});
   // Rollos de tela de fábrica: las devoluciones al proveedor que carga Ariel en Telas se descuentan acá.
-  db.ref('fabrica_v5/telas_stock/rollos').on('value',s=>{S.rollos=s.val()||{};S.rollosOk=true;if(S.view==='cuentas'||S.view==='devtela')render()});
+  db.ref('fabrica_v5/telas_stock/rollos').on('value',s=>{S.rollos=s.val()||{};S.rollosOk=true;if(S.view==='inicio'||S.view==='cuentas'||S.view==='devtela')render()});
   // Ingresos de fábrica que carga Noelia (remitos de tela y avíos): Meli los confirma contra la factura y suman a la cuenta.
   db.ref('fabrica_v5/telas_stock/remitos').on('value',s=>{S.remitosFab=s.val()||{};S.remitosOk=true;render()});
   db.ref('fabrica_v5/ingresos').on('value',s=>{S.ingFab=s.val()||{};S.ingFabOk=true;render()});
@@ -223,7 +223,7 @@ function render(){
   if(!S.user||!USERS[S.user]){renderLogin();return}
   if(!S.cfg){$('#app').innerHTML='<div class="empty">Cargando…</div>';return}
   const nFact=factPendientes().length+devGrupos().length+ingPend().length;
-  const tabs=[['cargar','Cargar'],['agenda','Agenda'],['mov','Movim.'],['cuentas','Cuentas'+(nFact?` <span class="pill p-pend" style="padding:1px 6px">${nFact}</span>`:'')],['rep','Reportes'],['ajustes','Ajustes']].filter(([k])=>isAdmin()||k!=='rep');
+  const tabs=[['inicio','Inicio'],['cargar','Cargar'],['agenda','Agenda'],['mov','Movim.'],['cuentas','Cuentas'+(nFact?` <span class="pill p-pend" style="padding:1px 6px">${nFact}</span>`:'')],['rep','Reportes'],['ajustes','Ajustes']].filter(([k])=>isAdmin()||k!=='rep');
   if(!isAdmin()&&S.view==='rep')S.view='cargar';
   $('#app').innerHTML=`<header><h1>Egresos By Nina</h1><span class="u">${USERS[S.user].nombre} · <a href="#" id="salir" style="color:inherit">Salir</a></span></header>
   <div class="wrap">${actAvisos()}${bannerBackup()}${borradosHtml()}${S.view==='agenda'&&S.agModo==='prono'?'':confirmarFijosHtml(false)}<div id="vista"></div></div>
@@ -232,7 +232,7 @@ function render(){
   document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{S.view=b.dataset.v;if(b.dataset.v!=='cuentas')S.cuentaAbierta=null;window.scrollTo(0,0);render()});
   const bb=$('#bkbtn');if(bb)bb.onclick=descargarBackup;
   bindBorrados();bindConfirmar();bindAct();
-  ({hist:vHist,fact:vFact,traer:vTraer,devtela:vDevTela,ingfab:vIngFab,cargar:vCargar,agenda:vAgenda,mov:vMov,cuentas:vCuentas,rep:vRep,ajustes:vAjustes})[S.view]();
+  ({inicio:vInicio,hist:vHist,fact:vFact,traer:vTraer,devtela:vDevTela,ingfab:vIngFab,cargar:vCargar,agenda:vAgenda,mov:vMov,cuentas:vCuentas,rep:vRep,ajustes:vAjustes})[S.view]();
 }
 
 function diasDesdeBackup(){const b=S.cfg?.ultimoBackup?.fecha;if(!b)return Infinity;return Math.floor((Date.now()-new Date(b).getTime())/86400000)}
@@ -1547,6 +1547,38 @@ function abrirProno(id,mes){
     else{rec.creadoPor=S.user;rec.ts=Date.now();const nid=uid();await db.ref(ROOT+'/pronostico/'+nid).set(rec);logAcc('crear','pronostico',nid,rs)}
     cerrarModal();toast('Guardado');
   };
+}
+// ---------- INICIO (nov 2026) ----------
+// Pantalla de arranque de Meli y Ariel: lo vencido, lo que vence en 7 días, entregas de talleres para facturar,
+// remitos de tela/avíos sin factura y devoluciones de tela. Cada botón lleva a donde ya se hace esa tarea.
+function vInicio(){
+  const h=hoy(), lim=addDias(h,7);
+  const occ=ocurrencias(lim).filter(o=>!o.pagado);
+  const venc=occ.filter(o=>o.fecha<h), sem=occ.filter(o=>o.fecha>=h);
+  const tot=l=>{const t={};l.forEach(o=>{t[o.moneda]=(t[o.moneda]||0)+(Number(o.monto)||0)});return Object.entries(t).map(([m,v])=>money(v,m)).join(' + ')||'$ 0'};
+  const fact=factPendientes().map(([id,it])=>({id,it})).sort((a,b)=>(a.it.fecha_cerrado||0)-(b.it.fecha_cerrado||0));
+  const ing=ingPend(), dev=devGrupos();
+  const dias=f=>Math.round((fromIso(h)-fromIso(f))/86400000);
+  const nom=USERS[S.user]?USERS[S.user].nombre:'';
+  const fechaTxt=new Date().toLocaleDateString('es-AR',{weekday:'long',day:'2-digit',month:'2-digit'});
+  const kpi=(v,t,alerta)=>`<div style="background:${alerta?'var(--danger-bg)':'var(--card)'};border:1px solid ${alerta?'#f5c2bd':'var(--line)'};border-radius:10px;padding:10px 12px"><b style="display:block;font-size:18px;${alerta?'color:var(--danger)':''}">${v}</b><span style="font-size:12px;color:${alerta?'var(--danger)':'var(--muted)'}">${t}</span></div>`;
+  const lab=(t,n,der)=>`<div style="display:flex;justify-content:space-between;align-items:center;margin:16px 0 6px"><b style="font-size:13px">${t} <span class="pill p-na" style="padding:1px 7px">${n}</span></b>${der||''}</div>`;
+  const vacio=t=>`<div class="list"><div class="row" style="cursor:default"><span class="sub" style="margin:0">${t}</span></div></div>`;
+  const filaOcc=o=>`<div class="row" style="cursor:default;align-items:center"><div style="min-width:0;flex:1"><b style="font-size:14px">${esc(occNombre(o))}</b><div class="sub">${o.fecha<h?'venció':'vence'} ${esc(fmtF(o.fecha))}${medNom(o.p.medio)?' · '+esc(medNom(o.p.medio)):''}${o.p.cuenta?' · '+esc(ctaNom(o.p.cuenta)):''}</div></div>
+    <b style="white-space:nowrap">${money(o.monto,o.moneda)}</b>${o.fecha<h?`<span class="pill p-deb">${dias(o.fecha)} día${dias(o.fecha)!==1?'s':''}</span>`:''}<button class="pri" data-ipagar="${esc(o.prog)}|${esc(o.k)}">Pagar</button></div>`;
+  $('#vista').innerHTML=`<div style="margin:4px 0 10px"><div style="font-size:18px;font-weight:800">Hola ${esc(nom)}</div><div class="sub" style="margin:0">${esc(fechaTxt.charAt(0).toUpperCase()+fechaTxt.slice(1))}</div></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px">
+      ${kpi(tot(venc),`vencido sin pagar · ${venc.length} pago${venc.length!==1?'s':''}`,venc.length>0)}
+      ${kpi(tot(sem),`vence en 7 días · ${sem.length} pago${sem.length!==1?'s':''}`)}
+      ${kpi(fact.length,'entregas para facturar')}
+      ${kpi(ing.length+dev.length,`remitos sin factura${dev.length?' · '+dev.length+' devoluci'+(dev.length!==1?'ones':'ón'):''}`)}</div>
+    ${lab('Pagos vencidos',venc.length)}${venc.length?`<div class="list">${venc.map(filaOcc).join('')}</div>`:vacio('No hay nada vencido.')}
+    ${lab('Vence en los próximos 7 días',sem.length,'<button data-ir="agenda">Ver agenda ›</button>')}${sem.length?`<div class="list">${sem.map(filaOcc).join('')}</div>`:vacio('No vence nada esta semana.')}
+    ${lab('Entregas de talleres para facturar',fact.length,fact.length?'<button data-ir="fact">Ir a facturar ›</button>':'')}${fact.length?`<div class="list">${fact.map(({it})=>`<div class="row" data-ir="fact" style="align-items:center"><div style="min-width:0;flex:1"><b style="font-size:14px">Corte ${esc(String(it.numero_corte||'').replace(/^corte\s*/i,''))} · ${esc(it.code||'')}${it.name?' · '+esc(it.name):''}</b><div class="sub">${esc(it.taller||it.proveedor||'Sin taller')} · ${factCant(it).toLocaleString('es-AR')} prendas${Number(it.precio_taller)>0?' · '+money(Number(it.precio_taller),'ARS')+' c/u':' · sin precio'}</div></div><b style="white-space:nowrap">${Number(it.precio_taller)>0?money(factMonto(it),'ARS'):''}</b></div>`).join('')}</div>`:vacio('No hay entregas para facturar.')}
+    ${lab('Remitos de tela y avíos sin factura',ing.length,ing.length?'<button data-ir="ingfab">Confirmar ›</button>':'')}${ing.length?`<div class="list">${ing.map(x=>`<div class="row" data-ir="ingfab" style="align-items:center"><div style="min-width:0;flex:1"><b style="font-size:14px">${esc(x.tipo)} · ${esc(x.proveedor)}${x.remito?' · remito '+esc(x.remito):''}</b><div class="sub">${esc(x.detalle)}${x.por?' · cargó '+esc(({noelia:'Noelia',ariel:'Ariel',peque:'Peque',emir:'Emir'})[x.por]||x.por):''}</div></div><span class="pill p-pend">${x.total?money(x.total,x.moneda):'sin importe'}</span></div>`).join('')}</div>`:vacio('No hay remitos sin factura.')}
+    ${lab('Devoluciones de tela para descontar',dev.length,dev.length?'<button data-ir="devtela">Descontar ›</button>':'')}${dev.length?`<div class="list">${dev.map(g=>`<div class="row" data-ir="devtela" style="align-items:center"><div style="min-width:0;flex:1"><b style="font-size:14px">${esc(g.proveedor)}${g.remito?' · remito '+esc(g.remito):''}</b><div class="sub">${g.rollos.length} rollo${g.rollos.length!==1?'s':''} devuelto${g.rollos.length!==1?'s':''}${g.sinPrecio?' · '+g.sinPrecio+' sin precio':''}</div></div><span class="pill p-pend">${money(g.importe,g.moneda)}</span></div>`).join('')}</div>`:vacio('No hay devoluciones pendientes.')}`;
+  document.querySelectorAll('#vista [data-ipagar]').forEach(b=>b.onclick=ev=>{ev.stopPropagation();const[p,k]=b.dataset.ipagar.split('|');abrirPagar(p,k)});
+  document.querySelectorAll('#vista [data-ir]').forEach(b=>b.onclick=()=>{S.view=b.dataset.ir;window.scrollTo(0,0);render()});
 }
 function vAgenda(){
   const t=hoy(),sem=rango('semana',0);
