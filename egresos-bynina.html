@@ -37,6 +37,7 @@ nav button.on{color:var(--accent);font-weight:700;box-shadow:inset 0 3px 0 var(-
 .p-pend{background:var(--warn-bg);color:var(--warn);font-weight:700}
 .p-ok{background:var(--ok-bg);color:var(--ok)}
 .p-na{background:#eef0f3;color:var(--muted)}
+.p-sue{background:#e3ebf6;color:#416096}.p-bono{background:#f6e9ed;color:#9B5C6B}.p-fer{background:#e8f1f7;color:#4f7898}.p-otro{background:#eef0f3;color:var(--muted)}
 .p-deb{background:var(--danger-bg);color:var(--danger);font-weight:700}
 .p-par{background:var(--warn-bg);color:var(--warn);font-weight:700}
 .asg{display:inline-block;border:1px solid var(--line);background:#fff;border-radius:999px;padding:2px 8px;font-size:11px;margin:4px 4px 0 0;white-space:nowrap}
@@ -264,7 +265,8 @@ function diffEg(a,b){
 function diffCargo(a,b){const out=[];
   if(Number(a.monto)!==Number(b.monto))out.push(`Monto: ${money(a.monto,monCta(a.cuenta))} → ${money(b.monto,monCta(b.cuenta))}`);
   if(a.fecha!==b.fecha)out.push(`Fecha: ${fmtF(a.fecha)} → ${fmtF(b.fecha)}`);
-  if((a.desc||'')!==(b.desc||''))out.push(`Descripción: ${a.desc} → ${b.desc}`);return out}
+  if((a.desc||'')!==(b.desc||''))out.push(`Descripción: ${a.desc} → ${b.desc}`);
+  if(S.cuentas[b.cuenta]?.tipo==='Empleados'&&conceptoCargo(a)!==conceptoCargo(b))out.push(`Concepto: ${conceptoCargo(a)} → ${conceptoCargo(b)}`);return out}
 const hora=ts=>{const d=new Date(ts);return pad(d.getHours())+':'+pad(d.getMinutes())};
 const ACC_TXT={crear:'cargó',editar:'editó',borrar:'borró',restaurar:'restauró',bajado:'marcó como bajado',debitado:'marcó como debitado',backup:'descargó el backup',config:'cambió la configuración',quitar:'quitó',reprogramar:'reprogramó',omitir:'salteó',facturar:'facturó',desfacturar:'anuló la facturación de',pedirBorrado:'pidió borrar',rechazarBorrado:'rechazó borrar'};
 const TIPO_TXT={egreso:'un pago',debe:'un debe',descuento:'un descuento',cuenta:'la cuenta',programado:'el pago agendado',pronostico:'el gasto pronosticado',vencimiento:'el vencimiento',config:'',backup:''};
@@ -322,7 +324,7 @@ function bindAct(){
 }
 
 // ---------- CARGAR / EDITAR EGRESO ----------
-function nuevoDraft(pre){return Object.assign({id:null,monto:'',fecha:hoy(),categoria:null,cuenta:'',medio:null,nota:'',foto:'',estado:null,venc:null,moneda:'ARS',cotizacion:'',cheques:null,soloAgenda:false},pre||{})}
+function nuevoDraft(pre){return Object.assign({id:null,monto:'',fecha:hoy(),categoria:null,cuenta:'',medio:null,nota:'',foto:'',estado:null,venc:null,moneda:'ARS',cotizacion:'',cheques:null,soloAgenda:false,concepto:null},pre||{})}
 function vCargar(){
   if(!S.draft||S.draft.id)S.draft=nuevoDraft();
   $('#vista').innerHTML=formEgreso(S.draft,false);bindFormEgreso(S.draft,false,$('#vista'),()=>{S.draft=nuevoDraft();render()});
@@ -346,6 +348,8 @@ function formEgreso(d,modal){
   <label for="fa">Cuenta</label><select id="fa">${opcionesCuentas(d.cuenta)}</select>
   <label>Medio de pago</label><div class="chips" id="fmd">${meds.map(([id,c])=>`<button class="chip ${d.medio===id?'on':''}" data-id="${id}">${esc(c.nombre)}</button>`).join('')}</div>
   <div id="fcheq"></div>
+  <div id="fconw" class="${S.cuentas[d.cuenta]?.tipo==='Empleados'?'':'hidden'}"><label>¿Qué paga?</label><div class="chips" id="fcon">${CONCEPTOS.map(k=>`<button class="chip ${d.concepto===k?'on':''}" data-k="${k}">${k}</button>`).join('')}</div>
+  <p class="sub">Opcional. Si no elegís, va a sueldo (o a bono si la nota dice "bono"). Tocá de nuevo para sacarlo.</p></div>
   <label for="fn">Nota</label><input id="fn" placeholder="Entrega parcial corte 412 · Vale ropa: remera 7800" value="${esc(d.nota)}">
   ${d.id?(d.venc?`<label>Vencimiento</label><p class="sub" style="font-size:14px">Paga: ${esc(vencTexto(d.venc))}</p>`:''):`<div id="fvw" class="hidden"><label>¿Corresponde a un vencimiento agendado?</label><div class="chips" id="fv"></div></div>`}
   <label>Comprobante</label>
@@ -370,7 +374,9 @@ function bindFormEgreso(d,modal,root,onNew){
   q('#fm').onblur=e=>{const v=parseMonto(e.target.value);if(v){e.target.value=v.toLocaleString('es-AR');d.monto=e.target.value}};
   q('#ff').onchange=e=>d.fecha=e.target.value;
   q('#fn').oninput=e=>d.nota=e.target.value;
-  q('#fa').onchange=e=>{d.cuenta=e.target.value;d.moneda=monCta(d.cuenta);actMon();const cc=S.cuentas[d.cuenta]?.llevaCC;q('#fhint').textContent=cc?'La cuenta lleva cta. cte.: queda "Pendiente de bajar" hasta que la marques como bajada.':d.cuenta?'Esta cuenta no lleva cta. cte.':'';
+  const pintarCon=()=>{const emp=S.cuentas[d.cuenta]?.tipo==='Empleados';q('#fconw').classList.toggle('hidden',!emp);q('#fcon').querySelectorAll('.chip').forEach(x=>x.classList.toggle('on',x.dataset.k===d.concepto))};
+  q('#fcon').querySelectorAll('.chip').forEach(b=>b.onclick=()=>{d.concepto=d.concepto===b.dataset.k?null:b.dataset.k;pintarCon()});
+  q('#fa').onchange=e=>{d.cuenta=e.target.value;d.moneda=monCta(d.cuenta);actMon();pintarCon();const cc=S.cuentas[d.cuenta]?.llevaCC;q('#fhint').textContent=cc?'La cuenta lleva cta. cte.: queda "Pendiente de bajar" hasta que la marques como bajada.':d.cuenta?'Esta cuenta no lleva cta. cte.':'';
     if(!d.categoria&&S.cuentas[d.cuenta]){const t=S.cuentas[d.cuenta].tipo;const m=activos(S.cfg.categorias).find(([,c])=>(t==='Talleres'&&c.nombre==='Talleres')||(t==='Empleados'&&/sueldo/i.test(c.nombre)));if(m){d.categoria=m[0];q('#fc').querySelectorAll('.chip').forEach(x=>x.classList.toggle('on',x.dataset.id===m[0]))}}pintarVenc(d,q)};
   q('#fc').querySelectorAll('.chip').forEach(b=>b.onclick=()=>{d.categoria=b.dataset.id;q('#fc').querySelectorAll('.chip').forEach(x=>x.classList.toggle('on',x===b));pintarVenc(d,q)});
   pintarVenc(d,q);actMon();
@@ -426,7 +432,7 @@ function bindFormEgreso(d,modal,root,onNew){
     if(needCot&&!cot){q('#ferr').textContent='Poné la cotización del dólar.';return}
     const cc=d.cuenta&&S.cuentas[d.cuenta]?.llevaCC;
     let estado=cc?'bajado':'na';
-    const rec={monto,fecha:d.fecha,categoria:d.categoria,cuenta:d.cuenta||null,medio:d.medio,nota:d.nota.trim(),foto:d.foto||null,estado,moneda,cotizacion:needCot?cot:null};
+    const rec={monto,fecha:d.fecha,categoria:d.categoria,cuenta:d.cuenta||null,medio:d.medio,nota:d.nota.trim(),foto:d.foto||null,estado,moneda,cotizacion:needCot?cot:null,concepto:S.cuentas[d.cuenta]?.tipo==='Empleados'?(d.concepto||null):null};
     if(needCot)db.ref(ROOT+'/config/ultimaCotizacion').set(cot);
     const chq=c=>({num:String(c.num).trim(),venc:c.venc,banco:c.banco||null,razon:c.razon||null,debitado:!!c.debitado,debitadoFecha:c.debitado?(c.debitadoFecha||hoy()):null});
     if(!d.id&&conCheque&&d.cheques.length>1){
@@ -484,7 +490,7 @@ function bindBorrados(){
 }
 const pillBorr=r=>r&&r.borradoPend?'<span class="pill" style="background:#fef3c7;color:#92400e;margin-left:4px">Borrado pendiente</span>':'';
 function abrirEgreso(id){const e=S.egresos[id];if(!e)return;
-  const d={id,monto:(Math.round(Number(e.monto)*100)/100).toLocaleString('es-AR'),fecha:e.fecha,categoria:e.categoria,cuenta:e.cuenta||'',medio:e.medio,nota:e.nota||'',foto:e.foto||'',estado:e.estado,venc:e.venc||null,moneda:e.moneda||'ARS',cotizacion:e.cotizacion?Number(e.cotizacion).toLocaleString('es-AR'):'',cheques:e.cheque?[{num:e.cheque.num,venc:e.cheque.venc,banco:e.cheque.banco||'',razon:e.cheque.razon||'',debitado:!!e.cheque.debitado,debitadoFecha:e.cheque.debitadoFecha||null,importe:(Math.round(Number(e.monto)*100)/100).toLocaleString('es-AR')}]:null,soloAgenda:!!e.soloAgenda};
+  const d={id,monto:(Math.round(Number(e.monto)*100)/100).toLocaleString('es-AR'),fecha:e.fecha,categoria:e.categoria,cuenta:e.cuenta||'',medio:e.medio,nota:e.nota||'',foto:e.foto||'',estado:e.estado,venc:e.venc||null,moneda:e.moneda||'ARS',cotizacion:e.cotizacion?Number(e.cotizacion).toLocaleString('es-AR'):'',cheques:e.cheque?[{num:e.cheque.num,venc:e.cheque.venc,banco:e.cheque.banco||'',razon:e.cheque.razon||'',debitado:!!e.cheque.debitado,debitadoFecha:e.cheque.debitadoFecha||null,importe:(Math.round(Number(e.monto)*100)/100).toLocaleString('es-AR')}]:null,soloAgenda:!!e.soloAgenda,concepto:e.concepto||null};
   abrirModal(formEgreso(d,true));bindFormEgreso(d,true,$('#modal'))}
 function abrirModal(html){$('#modal').innerHTML=`<div class="modal-bg"><div class="modal">${html}</div></div>`;$('#modal .modal-bg').onclick=e=>{if(e.target.classList.contains('modal-bg'))cerrarModal()}}
 function cerrarModal(){$('#modal').innerHTML=''}
@@ -613,10 +619,17 @@ function movimientosCuenta(cid){
 // Cada pago se reparte entre los debes de la cuenta. Primero lo asignado a mano (egreso.asig =
 // lista de ids de debe, en orden; egreso.aViejo = pago a cuenta de cortes viejos que no están en
 // la cuenta, no se reparte). Lo que sobra va al debe más viejo primero. Créditos/descuentos: más viejo primero.
+// Empleados: cada debe tiene un concepto (Sueldo, Bono, Feriado, Otro). Los viejos sin concepto se deducen de la descripción.
+// Un pago es de bono si dice "bono" en la nota. Los pagos van primero a debes de su mismo concepto; los vales y las
+// faltas/descuentos van primero a sueldo (no a bonos). Lo asignado a mano se respeta igual.
+const CONCEPTOS=['Sueldo','Bono','Feriado','Otro'],CON_CLS={Sueldo:'p-sue',Bono:'p-bono',Feriado:'p-fer',Otro:'p-otro'};
+function conceptoCargo(c){if(!c||c.lado==='haber')return null;if(c.concepto)return c.concepto;const t=c.descBase||c.desc||'';return /\bbonos?\b/i.test(t)?'Bono':/feriado/i.test(t)?'Feriado':'Sueldo'}
+function conceptoPago(e){if(!e)return null;if(e.concepto)return e.concepto;return /\bbonos?\b/i.test(e.nota||'')?'Bono':null}
 function listaAsig(e){return e&&e.asig?(Array.isArray(e.asig)?e.asig:Object.values(e.asig)).filter(Boolean):[]}
 function imputacionCuenta(cid){
   const m=movimientosCuenta(cid),R=v=>Math.round(v*100)/100;
-  const debes=m.filter(x=>x.tipo==='debe').map(x=>({id:x.id,fecha:x.fecha,monto:x.monto,pag:0,de:[]}));
+  const emp=S.cuentas[cid]?.tipo==='Empleados';
+  const debes=m.filter(x=>x.tipo==='debe').map(x=>({id:x.id,fecha:x.fecha,monto:x.monto,pag:0,de:[],con:emp?conceptoCargo(S.cargos[x.id]):null}));
   const D=Object.fromEntries(debes.map(d=>[d.id,d]));
   const habs=m.filter(x=>x.tipo==='haber').map(x=>({id:x.id,fecha:x.fecha,monto:x.monto,esDesc:x.esDesc,resto:x.monto,a:[],modo:'auto',viejo:0}));
   const H=Object.fromEntries(habs.map(h=>[h.id,h]));
@@ -626,7 +639,8 @@ function imputacionCuenta(cid){
     if(e.aViejo){h.modo='viejo';h.viejo=h.resto;h.resto=0;return}
     const l=listaAsig(e);if(!l.length)return;h.modo='manual';
     l.forEach(did=>{const d=D[did];if(d&&h.resto>0)dar(h,d,Math.min(h.resto,d.monto-d.pag))})});
-  habs.forEach(h=>{for(const d of debes){if(h.resto<=0.004)break;const f=R(d.monto-d.pag);if(f>0.004)dar(h,d,Math.min(h.resto,f))}});
+  const orden=h=>{if(!emp)return debes;const k=h.esDesc?null:conceptoPago(S.egresos[h.id]);const pref=d=>k?d.con===k:d.con!=='Bono';return [...debes.filter(pref),...debes.filter(d=>!pref(d))]};
+  habs.forEach(h=>{for(const d of orden(h)){if(h.resto<=0.004)break;const f=R(d.monto-d.pag);if(f>0.004)dar(h,d,Math.min(h.resto,f))}});
   debes.forEach(d=>{d.falta=R(d.monto-d.pag);d.est=d.falta<=0.5?'ok':d.pag>0.5?'par':'deb'});
   return {debes,habs,D,H,aFavor:R(habs.reduce((s,h)=>s+h.resto,0)),viejo:R(habs.reduce((s,h)=>s+h.viejo,0))};
 }
@@ -674,13 +688,16 @@ function vCuentas(){
 }
 function vLedger(cid){
   const c=S.cuentas[cid],m=movimientosCuenta(cid),s=saldoCuenta(cid),mc=monCta(cid),imp=imputacionCuenta(cid);
-  const nEst=k=>imp.debes.filter(d=>d.est===k).length,LF=S.ledFiltro||'todos';
-  const ml=LF==='todos'?m:m.filter(x=>x.tipo==='debe'&&imp.D[x.id]&&imp.D[x.id].est===LF);
+  const nEst=k=>imp.debes.filter(d=>d.est===k).length,LF=S.ledFiltro||'todos',emp=c.tipo==='Empleados';
+  const cons=emp?CONCEPTOS.filter(k=>imp.debes.some(d=>d.con===k)):[],CF=cons.includes(S.ledCon)?S.ledCon:null;
+  const enCon=x=>{if(!CF)return true;if(x.tipo==='debe')return imp.D[x.id]&&imp.D[x.id].con===CF;const h=imp.H[x.id];return h&&h.a.some(a=>imp.D[a.d]&&imp.D[a.d].con===CF)};
+  const ml=(LF==='todos'?m:m.filter(x=>x.tipo==='debe'&&imp.D[x.id]&&imp.D[x.id].est===LF)).filter(enCon);
   const cDesc=x=>{if(x.tipo==='debe'){const p=partesCorte(x.id),d=imp.D[x.id],cg=S.cargos[x.id]||{};
       const t=p?`<b>Corte ${esc(p.n)}</b>${p.cod?' · '+esc(p.cod):''}${p.art?' · '+esc(p.art):''}${p.x?`<div class="sub" style="margin:1px 0 0">${esc(p.x)}</div>`:''}${cg.borradoPend?' <span class="pill p-pend">borrado pendiente</span>':''}`:esc(x.desc);
       const e=!d?'':d.est==='ok'?'<span class="pill p-ok">Pagado</span>':d.est==='par'?`<span class="pill p-par">Parcial · debe ${money(d.falta,mc)}</span> <span class="sub" style="display:inline">pagado ${money(d.pag,mc)}</span>`:`<span class="pill p-deb">Adeuda ${money(d.falta,mc)}</span>`;
-      return `${t}<div style="margin-top:4px">${e}</div>`}
-    const h=imp.H[x.id];let t=esc(x.desc)+(x.esDesc?' <span class="pill p-na">descuento</span>':'');if(!h)return t;
+      const cp=d&&d.con?`<span class="pill ${CON_CLS[d.con]||'p-otro'}">${d.con}</span> `:'';
+      return `${t}<div style="margin-top:4px">${cp}${e}</div>`}
+    const h=imp.H[x.id],ec=!x.esDesc&&S.egresos[x.id]?.concepto;let t=esc(x.desc)+(x.esDesc?' <span class="pill p-na">descuento</span>':'')+(ec?` <span class="pill ${CON_CLS[ec]||'p-otro'}">${ec}</span>`:'');if(!h)return t;
     const ch=h.a.map(a=>`<span class="asg">${esc(nomDebe(a.d))} ${money(a.v,mc)}</span>`).join('');
     const md=h.modo==='viejo'?'<span class="asg">A cuenta de cortes viejos</span>':h.modo==='manual'?'<span class="sub" style="display:inline;font-size:11px">asignado a mano</span>':'';
     let sug='';if(h.modo==='auto'&&!x.esDesc){const q=imp.debes.filter(d=>Math.abs(d.monto-h.monto)<1&&!(h.a.length===1&&h.a[0].d===d.id));if(q.length===1)sug=`<span class="asg sug" data-sug="${x.id}|${q[0].id}">¿Era ${esc(nomDebe(q[0].id))}? Asignar</span>`}
@@ -699,6 +716,10 @@ function vLedger(cid){
     return `<div class="met" style="margin-bottom:10px;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center"><div><div class="l">${tl}</div><div class="v num">${ad.length}${np?` <span class="sub" style="font-size:13px;font-weight:400">(${np} parcial${np>1?'es':''})</span>`:''}</div></div>
     <div style="text-align:right"><div class="l">Adeudado</div><div class="num" style="font-weight:700;margin-top:2px">${money(sumar(ad.map(d=>({monto:d.falta}))),mc)}</div>${v?`<div class="sub" style="margin:2px 0 0">Más viejo: ${esc(nomDebe(v.id))} · ${fmtFc(v.fecha)}</div>`:''}</div>
     ${imp.viejo?`<div class="sub" style="flex-basis:100%;margin:0">${money(imp.viejo,mc)} pagados a cuenta de cortes viejos (no se reparten acá)</div>`:''}${imp.aFavor>0.5?`<div class="sub" style="flex-basis:100%;margin:0;color:var(--ok)">${money(imp.aFavor,mc)} pagados de más, a favor</div>`:''}</div>`})()}
+  ${cons.length?`<div class="met" style="margin-bottom:10px"><div class="l" style="margin-bottom:6px">Por concepto</div>
+    <table class="lg" style="width:100%"><tr><th class="l">Concepto</th><th>Cargado</th><th>Pagado</th><th>Adeuda</th></tr>
+    ${cons.map(k=>{const l=imp.debes.filter(d=>d.con===k),R=v=>Math.round(v*100)/100,ca=R(l.reduce((a,d)=>a+d.monto,0)),pa=R(l.reduce((a,d)=>a+d.pag,0)),fa=R(l.reduce((a,d)=>a+Math.max(0,d.falta),0));
+      return `<tr><td class="l"><span class="pill ${CON_CLS[k]}">${k}</span></td><td class="num">${money(ca,mc)}</td><td class="num">${money(pa,mc)}</td><td class="num" style="font-weight:700;${fa>0.5?'color:var(--danger)':''}">${money(fa,mc)}</td></tr>`}).join('')}</table></div>`:''}
   <div class="actions" style="margin:0 0 10px"><button id="ldebe">Cargar debe</button><button id="ldesc">${c.tipo==='Empleados'?'Descuento':'Crédito / descuento'}</button><button id="lpago" class="pri">Cargar pago</button></div>
   ${(()=>{const ag=ocurrencias(addDias(hoy(),365)).filter(o=>!o.pagado&&o.p.cuenta===cid),tot=sumar(ag),dif=Math.round(s.saldo-tot);
     const chk=mc!=='ARS'||!ag.length?'':dif>0?`<span style="color:var(--danger)">Sin agendar: ${money(dif)}</span>`:dif<0?`<span style="color:var(--danger)">Agendado de más: ${money(-dif)}</span>`:'<span style="color:var(--ok)">Coincide con el saldo</span>';
@@ -707,9 +728,10 @@ function vLedger(cid){
       :`<div class="card" style="display:flex;align-items:center;gap:10px;padding:10px 12px"><div class="sub" style="flex:1;margin:0">No hay pagos agendados para esta cuenta.</div>${s.saldo>0?'<button id="lagen" style="flex:none">Agendar saldo</button>':''}</div>`}
     <div style="font-weight:700;margin:4px 0 6px">Movimientos</div>`})()}
   ${imp.debes.length?`<div class="chips" style="margin-bottom:8px">${[['todos','Todos'],['deb',`Adeudados (${nEst('deb')})`],['par',`Parciales (${nEst('par')})`],['ok',`Pagados (${nEst('ok')})`]].map(([k,t])=>`<button class="chip ${LF===k?'on':''}" data-lf="${k}">${t}</button>`).join('')}</div>`:''}
+  ${cons.length>1?`<div class="chips" style="margin-bottom:8px">${[[null,'Todos los conceptos'],...cons.map(k=>[k,k])].map(([k,t])=>`<button class="chip ${CF===k?'on':''}" data-lc="${k||''}">${t}</button>`).join('')}</div>`:''}
   ${m.length?`<div class="ledger-wrap"><table class="lg"><tr><th class="l">Fecha</th><th class="l">Descripción</th><th>Debe</th><th>Haber</th><th>Saldo</th></tr>
   ${ml.map(x=>`<tr data-k="${x.esDesc?'desc':x.tipo}" data-id="${x.id}"><td class="l num">${fmtF(x.fecha)}</td><td class="l">${cDesc(x)}</td>
-  <td class="num">${x.tipo==='debe'?money(x.monto,mc):''}</td><td class="num h">${x.tipo==='haber'?money(x.monto,mc):''}</td><td class="num" style="font-weight:700">${money(x.saldo,mc)}</td></tr>${raFila(x)}`).join('')}</table></div>`
+  <td class="num">${x.tipo==='debe'?money(x.monto,mc):''}</td><td class="num h">${x.tipo==='haber'?money(x.monto,mc):''}</td><td class="num" style="font-weight:700">${CF?'':money(x.saldo,mc)}</td></tr>${raFila(x)}`).join('')}</table></div>`
   :`<div class="empty">Esta cuenta todavía no tiene movimientos. Cargá lo que se le debe o un pago.</div>`}`;
   $('#volver').onclick=()=>{S.cuentaAbierta=null;render()};
   $('#ldebe').onclick=()=>abrirCargo(null,cid);
@@ -723,6 +745,7 @@ function vLedger(cid){
     const d=nuevoDraft({cuenta:cid,categoria:cat?cat[0]:null,moneda:mc});abrirModal('<h2>Cargar pago · '+esc(c.nombre)+'</h2>'+formEgreso(d,false)+'<button id="fcan2" style="width:100%;margin-top:8px">Cancelar</button>');bindFormEgreso(d,false,$('#modal'),cerrarModal);$('#fcan2').onclick=cerrarModal};
   document.querySelectorAll('table.lg tr[data-id]').forEach(r=>r.onclick=()=>r.dataset.k==='debe'||r.dataset.k==='desc'?abrirCargo(r.dataset.id,cid):abrirEgreso(r.dataset.id));
   document.querySelectorAll('[data-lf]').forEach(b=>b.onclick=()=>{S.ledFiltro=b.dataset.lf;S.reasig=null;render()});
+  document.querySelectorAll('[data-lc]').forEach(b=>b.onclick=()=>{S.ledCon=b.dataset.lc||null;S.reasig=null;render()});
   const guardarAsig=async(eid,rec,txt)=>{await db.ref(ROOT+'/egresos/'+eid).update(rec);logAcc('editar','egreso',eid,`${ctaNom(cid)} · pago ${money(S.egresos[eid].monto,S.egresos[eid].moneda)}: ${txt}`);S.reasig=null;S.reasigSel=[];toast('Asignación guardada');render()};
   document.querySelectorAll('[data-ra]').forEach(b=>b.onclick=ev=>{ev.stopPropagation();const id=b.dataset.ra;if(S.reasig===id){S.reasig=null}else{S.reasig=id;const e=S.egresos[id];S.reasigSel=listaAsig(e).length?[...listaAsig(e)]:imp.H[id].a.map(a=>a.d)}render()});
   document.querySelectorAll('[data-rs]').forEach(b=>{b.onclick=ev=>ev.stopPropagation();b.onchange=()=>{const id=b.dataset.rs,l=S.reasigSel||[];S.reasigSel=b.checked?[...l.filter(z=>z!==id),id]:l.filter(z=>z!==id);render()}});
@@ -913,6 +936,7 @@ function abrirCargo(id,cid,ladoNuevo){
   <p class="sub">${hab?(emp?'Baja lo que se le debe por faltas o llegadas tarde. No es un pago ni suma como gasto.':'Baja lo que se le debe sin pagar: notas de crédito, devoluciones o ajustes. No suma como gasto.'):emp?'Sueldo, comisiones u otro monto que se le debe.':'Entregas, facturas o lo que se le debe.'}</p>
   ${hab?`<label>Motivo</label><div class="chips" id="cmot">${MOT.map(m=>`<button class="chip ${c.motivo===m?'on':''}" data-m="${m}">${m}</button>`).join('')}</div>
   <p class="sub" id="cmoth">${c.motivo==='Ropa'?'Para ropa podés poner código, cantidad y precio: el total se calcula solo.':''}</p>`:''}
+  ${emp&&!hab?`<label>Concepto</label><div class="chips" id="ccon">${CONCEPTOS.map(k=>`<button class="chip ${conceptoCargo(c)===k?'on':''}" data-k="${k}">${k}</button>`).join('')}</div>`:''}
   <label for="cf">Fecha</label><input id="cf" type="date" value="${c.fecha}">
   <label for="cd">Descripción</label><input id="cd" value="${esc(c.desc)}" placeholder="${hab?(emp?'Faltó el 15/9':'NC 0001-00012345'):emp?'Sueldo 2da quincena septiembre':'Sweater Bordado Pasión Sol'}">
   <div class="grid2"><div><label for="cco">Código (opcional)</label><input id="cco" value="${esc(c.codigo||'')}" placeholder="7800"></div>
@@ -924,7 +948,9 @@ function abrirCargo(id,cid,ladoNuevo){
   <div class="actions">${id?'<button class="dan" id="cdel">Borrar</button>':''}<button id="ccan">Cancelar</button><button class="pri" id="cok">Guardar</button></div>`);
   const calc=()=>{const q=parseMonto($('#cca').value),p=parseMonto($('#cpr').value);if(q&&p)$('#cmo').value=(Math.round(q*p*100)/100).toLocaleString('es-AR')};
   $('#cca').oninput=calc;$('#cpr').oninput=calc;
-  let motivo=c.motivo||null;
+  let motivo=c.motivo||null,concepto=emp&&!hab?conceptoCargo(c):null;
+  let conTocado=!!c.concepto;const cd0=$('#cd');if(concepto&&cd0)cd0.addEventListener('input',()=>{if(conTocado)return;const k=conceptoCargo({desc:cd0.value});if(k!==concepto){concepto=k;document.querySelectorAll('#ccon .chip').forEach(x=>x.classList.toggle('on',x.dataset.k===k))}});
+  document.querySelectorAll('#ccon .chip').forEach(b=>b.onclick=()=>{concepto=b.dataset.k;conTocado=true;document.querySelectorAll('#ccon .chip').forEach(x=>x.classList.toggle('on',x===b))});
   document.querySelectorAll('#cmot .chip').forEach(b=>b.onclick=()=>{motivo=b.dataset.m;document.querySelectorAll('#cmot .chip').forEach(x=>x.classList.toggle('on',x===b));$('#cmoth').textContent=motivo==='Ropa'?'Para ropa podés poner código, cantidad y precio: el total se calcula solo.':''});
   $('#ccan').onclick=cerrarModal;
   if(id)$('#cdel').onclick=async()=>{const antes=S.cargos[id];
@@ -938,7 +964,7 @@ function abrirCargo(id,cid,ladoNuevo){
     const cant=parseMonto($('#cca').value),pre=parseMonto($('#cpr').value);
     const d=[codigo,desc].filter(Boolean).join(' ')+(cant&&pre?` · ${cant} × ${pre.toLocaleString('es-AR')}`:'');
     if(hab&&!motivo){$('#cerr').textContent='Elegí el motivo.';return}
-    const rec={cuenta:cid||c.cuenta,fecha:$('#cf').value||hoy(),desc:d.trim(),codigo:codigo||null,cantidad:cant||null,precio:pre||null,monto,lado:hab?'haber':null,motivo:hab?motivo:null};
+    const rec={cuenta:cid||c.cuenta,fecha:$('#cf').value||hoy(),desc:d.trim(),codigo:codigo||null,cantidad:cant||null,precio:pre||null,monto,lado:hab?'haber':null,motivo:hab?motivo:null,concepto:concepto||null};
     // guardamos la descripción limpia para poder re-editar
     rec.descBase=desc;
     const rs=`${ctaNom(rec.cuenta)} · ${hab?motivo+(rec.desc?' · ':''):''}${rec.desc} · ${money(rec.monto,monCta(rec.cuenta))}`,tl=hab?'descuento':'debe';
@@ -1765,7 +1791,7 @@ async function descargarBackup(){
     const est={pendiente:'Pendiente de bajar',bajado:'Bajado',na:'Sin cta. cte.'};
     XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(eg.map(e=>({Fecha:fmtF(e.fecha),Monto:Number(e.monto),Moneda:e.moneda||'ARS',Cotización:e.cotizacion||'','Monto en pesos':Math.round(ars(e)*100)/100,'Suma como gasto':noGasto(e)?'No':'Sí',Categoría:catNom(e.categoria),Cuenta:ctaNom(e.cuenta),'Medio de pago':medNom(e.medio),Estado:est[e.estado]||'',Nota:e.nota||'','Cargado por':USERS[e.creadoPor]?.nombre||e.creadoPor||'',Comprobante:e.foto||''}))),'Egresos');
     const cg=Object.values(S.cargos).sort((a,b)=>a.fecha.localeCompare(b.fecha));
-    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(cg.map(c=>({Fecha:fmtF(c.fecha),Cuenta:ctaNom(c.cuenta),Código:c.codigo||'',Descripción:c.descBase||c.desc,Cantidad:c.cantidad||'',Precio:c.precio||'',Debe:c.lado==='haber'?'':Number(c.monto),'Descuento (haber)':c.lado==='haber'?Number(c.monto):'',Motivo:c.motivo||'',Moneda:monCta(c.cuenta)}))),'Debe cargado');
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(cg.map(c=>({Fecha:fmtF(c.fecha),Cuenta:ctaNom(c.cuenta),Código:c.codigo||'',Descripción:c.descBase||c.desc,Cantidad:c.cantidad||'',Precio:c.precio||'',Debe:c.lado==='haber'?'':Number(c.monto),'Descuento (haber)':c.lado==='haber'?Number(c.monto):'',Motivo:c.motivo||'',Concepto:S.cuentas[c.cuenta]?.tipo==='Empleados'?conceptoCargo(c)||'':'',Moneda:monCta(c.cuenta)}))),'Debe cargado');
     const ctas=Object.entries(S.cuentas).filter(([,c])=>c.llevaCC).sort((a,b)=>TIPOS.indexOf(a[1].tipo)-TIPOS.indexOf(b[1].tipo)||a[1].nombre.localeCompare(b[1].nombre));
     XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(ctas.map(([id,c])=>{const s=saldoCuenta(id);return{Cuenta:c.nombre,Tipo:c.tipo,Moneda:c.moneda||'ARS',Debe:s.debe,Haber:s.haber,Saldo:s.saldo,Activa:c.activo===false?'No':'Sí'}})),'Saldos');
     ctas.forEach(([id,c])=>{const m=movimientosCuenta(id);if(!m.length)return;const impX=imputacionCuenta(id);
