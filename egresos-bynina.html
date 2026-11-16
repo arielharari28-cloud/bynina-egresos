@@ -1791,7 +1791,9 @@ function abrirOcc(prog,k){
   <div class="actions"><button id="opagar" class="pri">Pagar</button></div>
   <h3>Cambiar solo esta fecha</h3>
   <div class="grid2"><div><label for="ofe">Nueva fecha</label><input id="ofe" type="date" value="${o.fecha}"></div><div><label for="omo">Monto</label><input id="omo" class="num" inputmode="decimal" value="${Math.round(o.monto).toLocaleString('es-AR')}"></div></div>
-  <div class="actions"><button id="oomit" class="dan">${rep?'Saltear esta fecha':'Cancelar este pago'}</button><button id="orep">Guardar cambio</button></div>`}
+  <div class="actions"><button id="oomit" class="dan">${rep?'Saltear esta fecha':'Cancelar este pago'}</button><button id="orep">Guardar cambio</button></div>
+  ${k==='sf'?'':`<button id="osf" style="width:100%;margin-top:8px">Pasar a pendientes sin fecha</button>
+  <p class="sub">${rep?'Solo esta fecha pasa a "Pendientes sin fecha"; las demás de la programación siguen igual.':'Le saca la fecha y queda en "Pendientes sin fecha" hasta que le pongas día.'}</p>`}`}
   <h3>Toda la programación</h3>
   <p class="sub">${esc(REPITE.find(r=>r[0]===o.p.repite)?.[1]||'')}${o.p.repite==='cuotas'?' · '+o.p.cuotas+' cuotas':''} desde ${fmtF(o.p.fecha)}</p>
   <div class="actions"><button id="oedit">Editar</button><button id="oborr" class="dan">Borrar programación</button></div>
@@ -1802,6 +1804,13 @@ function abrirOcc(prog,k){
   else{
     $('#opagar').onclick=()=>abrirPagar(prog,k);
     $('#orep').onclick=async()=>{const f=$('#ofe').value,m=parseMonto($('#omo').value);if(!f||!m){toast('Poné fecha y monto');return}await ref.update({fecha:f===k?null:f,monto:m===Number(o.p.monto)?null:m});logAcc('reprogramar','vencimiento',prog,occNombre(o),{cambios:[f!==o.fecha?`Fecha: ${fmtF(o.fecha)} → ${fmtF(f)}`:'',m!==o.monto?`Monto: ${money(o.monto,o.moneda)} → ${money(m,o.moneda)}`:''].filter(Boolean)});cerrarModal();toast('Fecha actualizada')};
+    // Nov 2026: un pago ya agendado puede volver a "Pendientes sin fecha". Si es de una vez, se le saca la fecha;
+    // si se repite o es una cuota, se saltea esa fecha y se crea un pendiente sin fecha con su concepto y monto.
+    if($('#osf'))$('#osf').onclick=async()=>{const m=parseMonto($('#omo').value)||o.monto,nom=occNombre(o);
+      if(!rep){const up={};up['programados/'+prog+'/repite']='sinfecha';up['programados/'+prog+'/fecha']=null;up['programados/'+prog+'/editadoPor']=S.user;
+        up['ocurrencias/'+prog+'/'+k]=null;up['ocurrencias/'+prog+'/sf']=m!==Number(o.p.monto)?{monto:m}:null;await db.ref(ROOT).update(up)}
+      else{const nid=uid(),p=o.p;await db.ref(ROOT).update({['ocurrencias/'+prog+'/'+k+'/omitida']:true,['programados/'+nid]:{concepto:nom,monto:m,moneda:p.moneda||'ARS',fecha:null,repite:'sinfecha',cuotas:null,categoria:p.categoria||null,cuenta:p.cuenta||null,medio:p.medio||null,activo:true,creadoPor:S.user,ts:Date.now(),origen:{prog,k}}})}
+      logAcc('reprogramar','vencimiento',prog,nom,{cambios:[`Fecha: ${fmtF(o.fecha)} → sin fecha`]});cerrarModal();toast('Pasado a pendientes sin fecha')};
     $('#oomit').onclick=async()=>{if(!confirm(rep?'¿Saltear solo esta fecha?':'¿Cancelar este pago agendado?'))return;
       if(rep)await ref.update({omitida:true});else await db.ref(ROOT+'/programados/'+prog).update({activo:false});logAcc('omitir','vencimiento',prog,occNombre(o)+' del '+fmtF(o.fecha));cerrarModal();toast('Listo')};
   }
