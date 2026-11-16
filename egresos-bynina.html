@@ -1214,11 +1214,12 @@ function abrirCuenta(id){
 // Un "programado" es un pago a futuro (una vez, semanal, quincenal, mensual o en cuotas).
 // Cada fecha que genera es una "ocurrencia"; en /ocurrencias/{prog}/{fechaOriginal} se guarda si se pagó,
 // se reprogramó (fecha/monto) o se omitió.
-const REPITE=[['una','Una vez'],['semanal','Semanal'],['quincenal','Quincenal'],['mensual','Mensual'],['cuotas','En cuotas']];
+const REPITE=[['una','Una vez'],['semanal','Semanal'],['quincenal','Quincenal'],['mensual','Mensual'],['cuotas','En cuotas'],['sinfecha','Sin fecha todavía']];
 const corto=n=>n>=1e6?(Math.round(n/1e5)/10).toLocaleString('es-AR')+'M':n>=1e3?Math.round(n/1e3)+'k':String(Math.round(n));
 function addMes(isoStr,n,dia){const d=fromIso(isoStr);const y=d.getFullYear(),m=d.getMonth()+n;const ult=new Date(y,m+1,0).getDate();return iso(new Date(y,m,Math.min(dia,ult)))}
 function addDias(isoStr,n){const d=fromIso(isoStr);d.setDate(d.getDate()+n);return iso(d)}
 function fechasProgramado(p,hasta){
+  if(p.repite==='sinfecha'||!p.fecha)return[];
   const out=[],f0=p.fecha,dia=fromIso(f0).getDate();let i=0;
   if(p.repite==='una')out.push({k:f0});
   else if(p.repite==='cuotas'){for(i=0;i<(p.cuotas||1);i++)out.push({k:addMes(f0,i,dia),n:i+1,tot:p.cuotas})}
@@ -1236,23 +1237,29 @@ function ocurrencias(hasta){
       out.push({prog:pid,k:o.k,fecha:f,monto:ov.monto??Number(p.monto),moneda:p.moneda||'ARS',pagado:!!ov.pagado,egresoId:ov.egresoId||null,n:o.n,tot:o.tot,p})})});
   return out.sort((a,b)=>a.fecha.localeCompare(b.fecha)||b.monto-a.monto);
 }
+// Pagos pendientes sin fecha: se guardan como pago agendado con repite 'sinfecha' y su ocurrencia única es la clave 'sf'.
+// No entran en la agenda, vencidos, caja ni pronósticos hasta que se les pone fecha.
+function sfOcc(pid){const p=S.programados[pid];if(!p||p.activo===false||p.repite!=='sinfecha')return null;const ov=(S.ocurr[pid]||{}).sf||{};
+  return {prog:pid,k:'sf',fecha:null,monto:ov.monto??Number(p.monto),moneda:p.moneda||'ARS',pagado:!!ov.pagado,egresoId:ov.egresoId||null,p,sinFecha:true}}
+function sinFecha(){return Object.keys(S.programados).map(sfOcc).filter(o=>o&&!o.pagado).sort((a,b)=>(a.p.ts||0)-(b.p.ts||0))}
+const totMon=l=>{const t={};l.forEach(o=>{t[o.moneda]=(t[o.moneda]||0)+(Number(o.monto)||0)});return Object.entries(t).sort((a,b)=>a[0]==='ARS'?-1:1).map(([m,v])=>money(v,m)).join(' + ')||'$ 0'};
 const occNombre=o=>o.p.concepto+(o.n?` · cuota ${o.n} de ${o.tot}`:'');
 const tagMedio=n=>n?`<span class="pill" style="background:var(--accent-bg);color:var(--accent);margin-left:6px;font-weight:700">${esc(n)}</span>`:'';
-function vencTexto(v){const p=S.programados[v.prog];if(!p)return'vencimiento borrado';const o=ocurrencias('2100-01-01').find(x=>x.prog===v.prog&&x.k===v.k);return (o?occNombre(o):p.concepto)+' del '+fmtFc(o?o.fecha:v.k)}
+function vencTexto(v){const p=S.programados[v.prog];if(!p)return'vencimiento borrado';const o=buscarOcc(v.prog,v.k);if(v.k==='sf')return (o?occNombre(o):p.concepto)+' (sin fecha)';return (o?occNombre(o):p.concepto)+' del '+fmtFc(o?o.fecha:v.k)}
 // Opciones de vencimiento al cargar un egreso: solo pendientes de la cuenta elegida (o de la categoría si no hay cuenta), vencidos o de los próximos 30 días.
 function pintarVenc(d,q){
   const box=q('#fv');if(!box)return;const wrap=q('#fvw');
   // Sin cuenta ni categoría elegida no se muestra nada: evita elegir un vencimiento que no tiene nada que ver.
   if(!d.cuenta&&!d.categoria&&!d.venc){wrap.classList.add('hidden');box.innerHTML='';return}
   const lim=addDias(hoy(),30);
-  let l=ocurrencias(lim).filter(o=>!o.pagado);
+  let l=ocurrencias(lim).filter(o=>!o.pagado).concat(sinFecha());
   if(d.cuenta)l=l.filter(o=>o.p.cuenta===d.cuenta||(!o.p.cuenta&&d.categoria&&o.p.categoria===d.categoria));else if(d.categoria)l=l.filter(o=>o.p.categoria===d.categoria);else l=[];
   l=l.slice(0,6);
-  if(d.venc&&!l.find(o=>o.prog===d.venc.prog&&o.k===d.venc.k)){const o=ocurrencias('2100-01-01').find(o=>o.prog===d.venc.prog&&o.k===d.venc.k);if(o)l.unshift(o)}
+  if(d.venc&&!l.find(o=>o.prog===d.venc.prog&&o.k===d.venc.k)){const o=buscarOcc(d.venc.prog,d.venc.k);if(o)l.unshift(o)}
   // Si esa cuenta/categoría no tiene vencimientos pendientes, se oculta la pregunta entera.
   if(!l.length){wrap.classList.add('hidden');box.innerHTML='';return}
   wrap.classList.remove('hidden');
-  box.innerHTML=`<button class="chip ${!d.venc?'on':''}" data-v="">No corresponde</button>`+l.map(o=>`<button class="chip ${d.venc&&d.venc.prog===o.prog&&d.venc.k===o.k?'on':''}" data-v="${o.prog}|${o.k}">${esc(occNombre(o))} · ${fmtFc(o.fecha)} · ${money(o.monto,o.moneda)}</button>`).join('');
+  box.innerHTML=`<button class="chip ${!d.venc?'on':''}" data-v="">No corresponde</button>`+l.map(o=>`<button class="chip ${d.venc&&d.venc.prog===o.prog&&d.venc.k===o.k?'on':''}" data-v="${o.prog}|${o.k}">${esc(occNombre(o))} · ${o.fecha?fmtFc(o.fecha):'sin fecha'} · ${money(o.monto,o.moneda)}</button>`).join('');
   box.querySelectorAll('.chip').forEach(b=>b.onclick=()=>{
     if(!b.dataset.v){d.venc=null}else{const[prog,k]=b.dataset.v.split('|');d.venc={prog,k};const o=l.find(x=>x.prog===prog&&x.k===k);
       if(o&&!parseMonto(d.monto)){d.monto=(Math.round(o.monto*100)/100).toLocaleString('es-AR');q('#fm').value=d.monto;d.moneda=o.moneda;q('#fm').dispatchEvent(new Event('input'))}}
@@ -1587,7 +1594,8 @@ function vInicio(){
   const dias=f=>Math.round((fromIso(h)-fromIso(f))/86400000);
   const nom=USERS[S.user]?USERS[S.user].nombre:'';
   const fechaTxt=new Date().toLocaleDateString('es-AR',{weekday:'long',day:'2-digit',month:'2-digit'});
-  const kpi=(v,t,alerta)=>`<div style="background:${alerta?'var(--danger-bg)':'var(--card)'};border:1px solid ${alerta?'#f5c2bd':'var(--line)'};border-radius:10px;padding:10px 12px"><b style="display:block;font-size:18px;${alerta?'color:var(--danger)':''}">${v}</b><span style="font-size:12px;color:${alerta?'var(--danger)':'var(--muted)'}">${t}</span></div>`;
+  const sfl=sinFecha();
+  const kpi=(v,t,alerta,ir)=>`<div ${ir?`data-ir="${ir}" role="button" `:''}style="${ir?'cursor:pointer;':''}"background:${alerta?'var(--danger-bg)':'var(--card)'};border:1px solid ${alerta?'#f5c2bd':'var(--line)'};border-radius:10px;padding:10px 12px"><b style="display:block;font-size:18px;${alerta?'color:var(--danger)':''}">${v}</b><span style="font-size:12px;color:${alerta?'var(--danger)':'var(--muted)'}">${t}</span></div>`;
   const lab=(t,n,der)=>`<div style="display:flex;justify-content:space-between;align-items:center;margin:16px 0 6px"><b style="font-size:13px">${t} <span class="pill p-na" style="padding:1px 7px">${n}</span></b>${der||''}</div>`;
   const vacio=t=>`<div class="list"><div class="row" style="cursor:default"><span class="sub" style="margin:0">${t}</span></div></div>`;
   const filaOcc=o=>`<div class="row" style="cursor:default;align-items:center"><div style="min-width:0;flex:1"><b style="font-size:14px">${esc(occNombre(o))}</b><div class="sub">${o.fecha<h?'venció':'vence'} ${esc(fmtF(o.fecha))}${medNom(o.p.medio)?' · '+esc(medNom(o.p.medio)):''}${o.p.cuenta?' · '+esc(ctaNom(o.p.cuenta)):''}</div></div>
@@ -1597,14 +1605,69 @@ function vInicio(){
       ${kpi(tot(venc),`vencido sin pagar · ${venc.length} pago${venc.length!==1?'s':''}`,venc.length>0)}
       ${kpi(tot(sem),`vence en 7 días · ${sem.length} pago${sem.length!==1?'s':''}`)}
       ${kpi(fact.length,'entregas para facturar')}
-      ${kpi(ing.length+dev.length,`remitos sin factura${dev.length?' · '+dev.length+' devoluci'+(dev.length!==1?'ones':'ón'):''}`)}</div>
+      ${kpi(ing.length+dev.length,`remitos sin factura${dev.length?' · '+dev.length+' devoluci'+(dev.length!==1?'ones':'ón'):''}`)}
+      ${kpi(totMon(sfl),`pendiente sin fecha · ${sfl.length}`,false,'agenda')}</div>
     ${lab('Pagos vencidos',venc.length)}${venc.length?`<div class="list">${venc.map(filaOcc).join('')}</div>`:vacio('No hay nada vencido.')}
     ${lab('Vence en los próximos 7 días',sem.length,'<button data-ir="agenda">Ver agenda ›</button>')}${sem.length?`<div class="list">${sem.map(filaOcc).join('')}</div>`:vacio('No vence nada esta semana.')}
     ${lab('Entregas de talleres para facturar',fact.length,fact.length?'<button data-ir="fact">Ir a facturar ›</button>':'')}${fact.length?`<div class="list">${fact.map(({it})=>`<div class="row" data-ir="fact" style="align-items:center"><div style="min-width:0;flex:1"><b style="font-size:14px">Corte ${esc(String(it.numero_corte||'').replace(/^corte\s*/i,''))} · ${esc(it.code||'')}${it.name?' · '+esc(it.name):''}</b><div class="sub">${esc(it.taller||it.proveedor||'Sin taller')} · ${factCant(it).toLocaleString('es-AR')} prendas${Number(it.precio_taller)>0?' · '+money(Number(it.precio_taller),'ARS')+' c/u':' · sin precio'}</div></div><b style="white-space:nowrap">${Number(it.precio_taller)>0?money(factMonto(it),'ARS'):''}</b></div>`).join('')}</div>`:vacio('No hay entregas para facturar.')}
     ${lab('Remitos de tela y avíos sin factura',ing.length,ing.length?'<button data-ir="ingfab">Confirmar ›</button>':'')}${ing.length?`<div class="list">${ing.map(x=>`<div class="row" data-ir="ingfab" style="align-items:center"><div style="min-width:0;flex:1"><b style="font-size:14px">${esc(x.tipo)} · ${esc(x.proveedor)}${x.remito?' · remito '+esc(x.remito):''}</b><div class="sub">${esc(x.detalle)}${x.por?' · cargó '+esc(({noelia:'Noelia',ariel:'Ariel',peque:'Peque',emir:'Emir'})[x.por]||x.por):''}</div></div><span class="pill p-pend">${x.total?money(x.total,x.moneda):'sin importe'}</span></div>`).join('')}</div>`:vacio('No hay remitos sin factura.')}
     ${lab('Devoluciones de tela para descontar',dev.length,dev.length?'<button data-ir="devtela">Descontar ›</button>':'')}${dev.length?`<div class="list">${dev.map(g=>`<div class="row" data-ir="devtela" style="align-items:center"><div style="min-width:0;flex:1"><b style="font-size:14px">${esc(g.proveedor)}${g.remito?' · remito '+esc(g.remito):''}</b><div class="sub">${g.rollos.length} rollo${g.rollos.length!==1?'s':''} devuelto${g.rollos.length!==1?'s':''}${g.sinPrecio?' · '+g.sinPrecio+' sin precio':''}</div></div><span class="pill p-pend">${money(g.importe,g.moneda)}</span></div>`).join('')}</div>`:vacio('No hay devoluciones pendientes.')}`;
   document.querySelectorAll('#vista [data-ipagar]').forEach(b=>b.onclick=ev=>{ev.stopPropagation();const[p,k]=b.dataset.ipagar.split('|');abrirPagar(p,k)});
-  document.querySelectorAll('#vista [data-ir]').forEach(b=>b.onclick=()=>{S.view=b.dataset.ir;window.scrollTo(0,0);render()});
+  document.querySelectorAll('#vista [data-ir]').forEach(b=>b.onclick=()=>{S.view=b.dataset.ir;if(b.dataset.ir==='agenda'){S.agModo='lista';S.sfAb=true}window.scrollTo(0,0);render()});
+}
+// ---------- Pendientes sin fecha (bloque en Agenda) ----------
+// Lista de lo que hay que pagar pero todavía no tiene día. Se edita en la misma fila; al ponerle fecha pasa a la agenda como pago de una vez.
+function sfBloqueHtml(){
+  const l=sinFecha(),ab=S.sfAb!==false,ed=S.sfEdit;
+  const hace=p=>{if(!p.ts)return'';const d=Math.round((fromIso(hoy())-fromIso(iso(new Date(p.ts))))/86400000);return d<=0?'cargado hoy':d===1?'cargado ayer':'cargado hace '+d+' días'};
+  const cats=activos(S.cfg.categorias),meds=activos(S.cfg.medios);
+  const fila=o=>{const p=o.p,id=o.prog;
+    if(ed===id)return `<div class="row" style="background:var(--accent-bg);display:block;cursor:default" data-sfrow="${id}">
+      <div class="grid2"><div><label for="sfc" style="margin-top:0">Concepto</label><input id="sfc" value="${esc(p.concepto)}"></div><div><label for="sfm" style="margin-top:0">Monto</label><input id="sfm" class="num" inputmode="decimal" value="${(Math.round(o.monto*100)/100).toLocaleString('es-AR')}"></div></div>
+      <div class="grid2"><div><label for="sfa">Cuenta</label><select id="sfa">${opcionesCuentas(p.cuenta||'')}</select></div><div><label for="sfk">Categoría</label><select id="sfk"><option value="">Sin categoría</option>${cats.map(([k,c])=>`<option value="${k}" ${p.categoria===k?'selected':''}>${esc(c.nombre)}</option>`).join('')}</select></div></div>
+      <div class="grid2"><div><label for="sff">Fecha de pago (para agendarlo)</label><input id="sff" type="date"></div><div><label for="sfe">Medio previsto</label><select id="sfe"><option value="">Sin medio</option>${meds.map(([k,c])=>`<option value="${k}" ${p.medio===k?'selected':''}>${esc(c.nombre)}</option>`).join('')}</select></div></div>
+      <div class="chips" id="sfmo" style="margin-top:8px"><button class="chip ${o.moneda==='ARS'?'on':''}" data-v="ARS">Pesos</button><button class="chip ${o.moneda==='USD'?'on':''}" data-v="USD">Dólares</button></div>
+      <div id="sferr" class="err"></div>
+      <div class="actions" style="margin-top:10px"><button id="sfcan">Cancelar</button><button class="dan" id="sfdel">${isAdmin()?'Borrar':'Pedir borrar'}</button><button class="pri" id="sfok">Guardar</button></div></div>`;
+    const sub=[catNom(p.categoria)!=='Sin categoría'?catNom(p.categoria):'',ctaNom(p.cuenta)||'sin cuenta',medNom(p.medio),hace(p)].filter(Boolean).join(' · ');
+    return `<div class="row" data-sfed="${id}" style="align-items:center"><div style="flex:1;min-width:0"><div style="font-weight:700">${esc(p.concepto)}${pillBorr(p)}</div><div class="sub">${esc(sub)}</div></div>
+      <div style="text-align:right"><div class="num" style="font-weight:700">${money(o.monto,o.moneda)}</div><div style="display:flex;gap:6px;margin-top:6px;justify-content:flex-end"><button data-sfed="${id}" style="padding:6px 10px;font-size:13px">Ponerle fecha</button><button class="pri" data-sfpag="${id}" style="padding:6px 10px;font-size:13px">Pagar</button></div></div></div>`};
+  return `<div style="border:1px solid #e9d3b8;border-radius:12px;overflow:hidden;background:#fff;margin-top:12px">
+    <button id="sftog" class="row" style="width:100%;border:0;border-radius:0;background:var(--warn-bg);align-items:center;${ab?'border-bottom:1px solid #e9d3b8':''}"><span style="font-weight:700;color:var(--warn)">${ab?'▾':'▸'} Pendientes sin fecha <span class="pill" style="background:#fff;color:var(--warn)">${l.length}</span></span><span class="num" style="font-weight:700;color:var(--warn)">${l.length?totMon(l):''}</span></button>
+    ${ab?l.map(fila).join('')+`<div class="row" style="background:#fafbfc;cursor:default;align-items:center"><input id="sfnc" placeholder="Concepto (ej. saldo taller)" style="flex:2;min-width:0;padding:7px 10px"><input id="sfnm" class="num" inputmode="decimal" placeholder="Monto" style="flex:1;min-width:0;padding:7px 10px"><button class="pri" id="sfadd" style="padding:7px 12px;font-size:13px;white-space:nowrap">+ Sumar</button></div>`:''}
+  </div><div class="sub" style="margin:4px 2px 0">No suman en vencidos, semana ni caja hasta que tengan fecha.</div>`;
+}
+function bindSf(root){
+  const tg=root.querySelector('#sftog');if(!tg)return;
+  tg.onclick=()=>{S.sfAb=S.sfAb===false;render()};
+  root.querySelectorAll('[data-sfed]').forEach(b=>b.onclick=ev=>{ev.stopPropagation();S.sfEdit=b.dataset.sfed;render();setTimeout(()=>{const f=$('#sff');if(f&&b.tagName==='BUTTON')f.focus()},0)});
+  root.querySelectorAll('[data-sfpag]').forEach(b=>b.onclick=ev=>{ev.stopPropagation();abrirPagar(b.dataset.sfpag,'sf')});
+  const add=root.querySelector('#sfadd');
+  if(add){const nm=root.querySelector('#sfnm');nm.onblur=e=>{const v=parseMonto(e.target.value);if(v)e.target.value=v.toLocaleString('es-AR')};
+    add.onclick=async()=>{const concepto=root.querySelector('#sfnc').value.trim(),monto=parseMonto(nm.value);
+      if(!concepto||!monto){toast('Poné concepto y monto');return}
+      const nid=uid(),rec={concepto,monto,moneda:'ARS',fecha:null,repite:'sinfecha',cuotas:null,categoria:null,cuenta:null,medio:null,activo:true,creadoPor:S.user,ts:Date.now()};
+      S.sfEdit=nid;await db.ref(ROOT+'/programados/'+nid).set(rec);logAcc('crear','programado',nid,`${concepto} · ${money(monto,'ARS')} · sin fecha`);
+      render();toast('Sumado · completá cuenta y categoría si querés')}}
+  const row=root.querySelector('[data-sfrow]');if(!row)return;
+  const id=row.dataset.sfrow,p=S.programados[id];if(!p){S.sfEdit=null;return}
+  let mon=p.moneda||'ARS';
+  row.querySelectorAll('#sfmo .chip').forEach(b=>b.onclick=()=>{mon=b.dataset.v;row.querySelectorAll('#sfmo .chip').forEach(x=>x.classList.toggle('on',x===b))});
+  $('#sfa').onchange=e=>{const c=S.cuentas[e.target.value];if(c){mon=c.moneda||'ARS';row.querySelectorAll('#sfmo .chip').forEach(x=>x.classList.toggle('on',x.dataset.v===mon))}};
+  $('#sfm').onblur=e=>{const v=parseMonto(e.target.value);if(v)e.target.value=v.toLocaleString('es-AR')};
+  $('#sfcan').onclick=()=>{S.sfEdit=null;render()};
+  $('#sfdel').onclick=async()=>{if(!isAdmin()){pedirBorrado('programado',id,`Pendiente sin fecha: ${p.concepto} · ${money(p.monto,p.moneda)}`);return}
+    if(!confirm('¿Borrar este pendiente?'))return;S.sfEdit=null;await ejecBorrarProg(id);toast('Borrado')};
+  $('#sfok').onclick=async()=>{const concepto=$('#sfc').value.trim(),monto=parseMonto($('#sfm').value),fecha=$('#sff').value;
+    if(!concepto){$('#sferr').textContent='Poné un concepto.';return}
+    if(!monto){$('#sferr').textContent='Poné un monto.';return}
+    const cat=$('#sfk').value||null;
+    if(fecha&&!cat){$('#sferr').textContent='Para agendarlo elegí una categoría.';return}
+    const rec={concepto,monto,moneda:mon,cuenta:$('#sfa').value||null,categoria:cat,medio:$('#sfe').value||null,editadoPor:S.user};
+    if(fecha){rec.fecha=fecha;rec.repite='una'}
+    await db.ref(ROOT+'/programados/'+id).update(rec);
+    logAcc(fecha?'reprogramar':'editar','programado',id,`${concepto} · ${money(monto,mon)}${fecha?' · agendado para el '+fmtF(fecha):' · sin fecha'}`);
+    S.sfEdit=null;toast(fecha?'Agendado para el '+fmtF(fecha):'Guardado');render()};
 }
 function vAgenda(){
   const t=hoy(),sem=rango('semana',0);
@@ -1624,6 +1687,7 @@ function vAgenda(){
       ${l.length?porDiaHtml(l,rojo):'<div class="sub" style="padding:4px 2px">Nada agendado.</div>'}`).join('');
     body=`<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:4px"><button id="dabr" style="padding:6px 10px;font-size:13px">Abrir todo</button><button id="dcer" style="padding:6px 10px;font-size:13px">Cerrar todo</button></div>`+body;
     if(!Object.keys(S.programados).length&&!chequesAgenda('2999-12-31').some(o=>!o.pagado))body=`<div class="empty">Todavía no hay pagos agendados. Cargá alquiler, sueldos, echeqs o cuotas con "Agendar pago".</div>`;
+    body=sfBloqueHtml()+body;
   }else if(modo==='pormes'){body=porMesHtml();
   }else if(modo==='prono'){body=pronoHtml();
   }else if(modo==='caja'){body=cajaHtml();
@@ -1679,6 +1743,7 @@ function vAgenda(){
   const cp=$('#cprev');if(cp){cp.onclick=()=>{S.calOffset--;render()};$('#cnext').onclick=()=>{S.calOffset++;render()}}
   document.querySelectorAll('[data-dia]').forEach(b=>b.onclick=()=>{S.calSel=b.dataset.dia;render()});
   bindAgendaItems($('#vista'));
+  if(modo==='lista')bindSf($('#vista'));
   if(modo==='caja')bindCaja();
 }
 function abrirFechaDebito(){
@@ -1711,11 +1776,11 @@ function abrirAnteriores(){
     if(n){await db.ref(ROOT+'/egresos').update(up);logAcc('editar','egreso',null,`Cambió ${n} cheque${n>1?'s':''} entre anterior y normal`)}
     cerrarModal();toast(n?'Listo':'Sin cambios')};
 }
-function buscarOcc(prog,k){return ocurrencias('2100-01-01').find(o=>o.prog===prog&&o.k===k)}
+function buscarOcc(prog,k){if(k==='sf')return sfOcc(prog);return ocurrencias('2100-01-01').find(o=>o.prog===prog&&o.k===k)}
 function abrirPagar(prog,k){
   const o=buscarOcc(prog,k);if(!o)return;const p=o.p;
   const d=nuevoDraft({moneda:o.moneda,monto:(Math.round(o.monto*100)/100).toLocaleString('es-AR'),categoria:p.categoria||null,cuenta:p.cuenta||'',medio:p.medio||null,nota:occNombre(o),venc:{prog,k}});
-  abrirModal(`<h2>Pagar · ${esc(occNombre(o))}</h2><p class="sub">Vence ${fmtF(o.fecha)}. Revisá monto y medio, y guardá.</p>`+formEgreso(d,false)+'<button id="fcan2" style="width:100%;margin-top:8px">Cancelar</button>');
+  abrirModal(`<h2>Pagar · ${esc(occNombre(o))}</h2><p class="sub">${o.fecha?'Vence '+fmtF(o.fecha):'Pendiente sin fecha'}. Revisá monto y medio, y guardá.</p>`+formEgreso(d,false)+'<button id="fcan2" style="width:100%;margin-top:8px">Cancelar</button>');
   bindFormEgreso(d,false,$('#modal'),cerrarModal);$('#fcan2').onclick=cerrarModal;
 }
 function abrirOcc(prog,k){
@@ -1749,11 +1814,11 @@ function abrirProgramado(id,pre){
   abrirModal(`<h2>${id?'Editar pago agendado':'Agendar pago'}</h2>
   <label for="pc">Concepto</label><input id="pc" value="${esc(p.concepto)}" placeholder="Alquiler local">
   <label for="pm">Monto${p.repite==='cuotas'?' de cada cuota':''}</label><input id="pm" class="num" inputmode="decimal" value="${p.monto?Number(p.monto).toLocaleString('es-AR'):''}" placeholder="650.000" style="font-size:20px;font-weight:700">
-  <label for="pf">${id?'Primera fecha':'Fecha (o primera fecha si se repite)'}</label><input id="pf" type="date" value="${p.fecha}">
+  <div id="pfw" class="${p.repite==='sinfecha'?'hidden':''}"><label for="pf">${id?'Primera fecha':'Fecha (o primera fecha si se repite)'}</label><input id="pf" type="date" value="${p.fecha||hoy()}"></div>
   <div class="chips" id="pmo" style="margin-top:8px"><button class="chip ${(p.moneda||'ARS')==='ARS'?'on':''}" data-v="ARS">Pesos</button><button class="chip ${p.moneda==='USD'?'on':''}" data-v="USD">Dólares</button></div>
   <label>Se repite</label><div class="chips" id="pr">${REPITE.map(([k,t])=>`<button class="chip ${p.repite===k?'on':''}" data-r="${k}">${t}</button>`).join('')}</div>
   <div id="pcuo" class="${p.repite==='cuotas'?'':'hidden'}"><label for="pn">Cantidad de cuotas</label><input id="pn" inputmode="numeric" value="${esc(p.cuotas||'')}" placeholder="6"></div>
-  <p class="sub" id="pqh">${p.repite==='quincenal'?'Quincenal: la fecha que elijas y 15 días después, todos los meses.':''}</p>
+  <p class="sub" id="pqh">${p.repite==='quincenal'?'Quincenal: la fecha que elijas y 15 días después, todos los meses.':p.repite==='sinfecha'?'Queda en "Pendientes sin fecha" hasta que le pongas día.':''}</p>
   <label>Categoría</label><div class="chips" id="pca">${cats.map(([k,c])=>`<button class="chip ${p.categoria===k?'on':''}" data-id="${k}">${esc(c.nombre)}</button>`).join('')}</div>
   <label for="pa">Cuenta (opcional)</label><select id="pa">${opcionesCuentas(p.cuenta)}</select>
   <label>Medio previsto</label><div class="chips" id="pme">${meds.map(([k,c])=>`<button class="chip ${p.medio===k?'on':''}" data-id="${k}">${esc(c.nombre)}</button>`).join('')}</div>
@@ -1762,7 +1827,7 @@ function abrirProgramado(id,pre){
   <div class="actions"><button id="pcan">Cancelar</button><button class="pri" id="pok">Guardar</button></div>`);
   let rep=p.repite,cat=p.categoria,med=p.medio,pmon=p.moneda||'ARS';
   document.querySelectorAll('#pmo .chip').forEach(b=>b.onclick=()=>{pmon=b.dataset.v;document.querySelectorAll('#pmo .chip').forEach(x=>x.classList.toggle('on',x===b))});
-  document.querySelectorAll('#pr .chip').forEach(b=>b.onclick=()=>{rep=b.dataset.r;document.querySelectorAll('#pr .chip').forEach(x=>x.classList.toggle('on',x===b));$('#pcuo').classList.toggle('hidden',rep!=='cuotas');$('#pqh').textContent=rep==='quincenal'?'Quincenal: la fecha que elijas y 15 días después, todos los meses.':''});
+  document.querySelectorAll('#pr .chip').forEach(b=>b.onclick=()=>{rep=b.dataset.r;document.querySelectorAll('#pr .chip').forEach(x=>x.classList.toggle('on',x===b));$('#pcuo').classList.toggle('hidden',rep!=='cuotas');$('#pfw').classList.toggle('hidden',rep==='sinfecha');$('#pqh').textContent=rep==='quincenal'?'Quincenal: la fecha que elijas y 15 días después, todos los meses.':rep==='sinfecha'?'Queda en "Pendientes sin fecha" hasta que le pongas día.':''});
   document.querySelectorAll('#pca .chip').forEach(b=>b.onclick=()=>{cat=b.dataset.id;document.querySelectorAll('#pca .chip').forEach(x=>x.classList.toggle('on',x===b))});
   document.querySelectorAll('#pme .chip').forEach(b=>b.onclick=()=>{med=b.dataset.id;document.querySelectorAll('#pme .chip').forEach(x=>x.classList.toggle('on',x===b))});
   $('#pa').onchange=e=>{const c=S.cuentas[e.target.value];if(c){pmon=c.moneda||'ARS';document.querySelectorAll('#pmo .chip').forEach(x=>x.classList.toggle('on',x.dataset.v===pmon))}if(c&&!cat){const m=cats.find(([,k])=>(c.tipo==='Talleres'&&k.nombre==='Talleres')||(c.tipo==='Empleados'&&/sueldo/i.test(k.nombre)));if(m){cat=m[0];document.querySelectorAll('#pca .chip').forEach(x=>x.classList.toggle('on',x.dataset.id===cat))}}};
@@ -1772,13 +1837,13 @@ function abrirProgramado(id,pre){
     const concepto=$('#pc').value.trim(),monto=parseMonto($('#pm').value),fecha=$('#pf').value,cu=parseInt($('#pn').value,10);
     if(!concepto){$('#perr').textContent='Poné un concepto.';return}
     if(!monto){$('#perr').textContent='Poné un monto.';return}
-    if(!fecha){$('#perr').textContent='Poné una fecha.';return}
+    if(!fecha&&rep!=='sinfecha'){$('#perr').textContent='Poné una fecha.';return}
     if(rep==='cuotas'&&!(cu>=1&&cu<=120)){$('#perr').textContent='Poné la cantidad de cuotas.';return}
     if(!cat){$('#perr').textContent='Elegí una categoría.';return}
-    const rec={concepto,monto,moneda:pmon,fecha,repite:rep,cuotas:rep==='cuotas'?cu:null,categoria:cat,cuenta:$('#pa').value||null,medio:med||null,activo:true};
-    const rs=`${concepto} · ${money(monto,pmon)} · ${REPITE.find(r=>r[0]===rep)[1]}${rep==='cuotas'?' ('+cu+')':''} desde ${fmtF(fecha)}`;
+    const rec={concepto,monto,moneda:pmon,fecha:rep==='sinfecha'?null:fecha,repite:rep,cuotas:rep==='cuotas'?cu:null,categoria:cat,cuenta:$('#pa').value||null,medio:med||null,activo:true};
+    const rs=`${concepto} · ${money(monto,pmon)} · ${REPITE.find(r=>r[0]===rep)[1]}${rep==='cuotas'?' ('+cu+')':''}${rep==='sinfecha'?'':' desde '+fmtF(fecha)}`;
     if(id){rec.editadoPor=S.user;await db.ref(ROOT+'/programados/'+id).update(rec);logAcc('editar','programado',id,rs)}else{rec.creadoPor=S.user;rec.ts=Date.now();const nid=uid();await db.ref(ROOT+'/programados/'+nid).set(rec);logAcc('crear','programado',nid,rs)}
-    cerrarModal();toast(rep==='cuotas'?`${cu} cuotas agendadas`:'Pago agendado');
+    cerrarModal();toast(rep==='cuotas'?`${cu} cuotas agendadas`:rep==='sinfecha'?'Sumado a pendientes sin fecha':'Pago agendado');
   };
 }
 
@@ -1800,6 +1865,7 @@ async function descargarBackup(){
     XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(ch.map(e=>({'NUM CHEQUE':e.cheque.num,MES:mesNom(e.cheque.venc),VENC:fmtF(e.cheque.venc),IMPORTE:Number(e.monto),MONEDA:e.moneda||'ARS','RAZON SOCIAL':razonNom(e.cheque.razon),BANCO:bancoNom(e.cheque.banco),PROVEEDOR:ctaNom(e.cuenta),'FECHA FIRMADO':fmtF(e.fecha),TIPO:medNom(e.medio),ANTERIOR:e.soloAgenda?'Sí':'No',ESTADO:e.cheque.debitado?'Debitado':'A debitar'}))),nombreHoja('Cheques',usados));
     const ag=ocurrencias(addDias(hoy(),120)).filter(o=>!o.pagado);
     XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(ag.map(o=>({Vence:fmtF(o.fecha),Concepto:occNombre(o),Monto:o.monto,Moneda:o.moneda,Categoría:catNom(o.p.categoria),Cuenta:ctaNom(o.p.cuenta),'Medio previsto':medNom(o.p.medio),Estado:o.fecha<hoy()?'Vencido':'Pendiente'}))),nombreHoja('Agenda pendiente',usados));
+    const sfb=sinFecha();if(sfb.length)XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(sfb.map(o=>({Concepto:o.p.concepto,Monto:o.monto,Moneda:o.moneda,Categoría:catNom(o.p.categoria),Cuenta:ctaNom(o.p.cuenta),'Medio previsto':medNom(o.p.medio),Cargado:o.p.ts?fmtF(iso(new Date(o.p.ts))):''}))),nombreHoja('Pendiente sin fecha',usados));
     XLSX.writeFile(wb,`Backup egresos By Nina ${hoy()}.xlsx`);
     await db.ref(ROOT+'/config/ultimoBackup').set({fecha:new Date().toISOString(),por:S.user});logAcc('backup','backup',null,'');
     toast('Backup descargado');
